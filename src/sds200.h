@@ -35,8 +35,6 @@ const Status& status();
 
 void sendRaw(const char* cmd);  // without trailing \r
 void key(char code, char mode = 'P');   // KEY,<code>,<mode>  (P = press, L = long press)
-void setVolume(int level);      // 0-29
-void setSquelch(int level);     // 0-19
 void rebootScanner();           // MSM,<n>: brief USB mass-storage mode, then the scanner restarts
 
 }  // namespace Sds200

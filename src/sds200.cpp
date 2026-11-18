@@ -35,20 +35,6 @@ void key(char code, char mode) {
   s_lastPoll = 0;   // refresh status soon
 }
 
-void setVolume(int level) {
-  char buf[16];
-  snprintf(buf, sizeof(buf), "VOL,%d", constrain(level, 0, 29));
-  sendRaw(buf);
-  if (s_st.vol >= 0) { s_st.vol = constrain(level, 0, 29); s_st.version++; }
-}
-
-void setSquelch(int level) {
-  char buf[16];
-  snprintf(buf, sizeof(buf), "SQL,%d", constrain(level, 0, 19));
-  sendRaw(buf);
-  if (s_st.sql >= 0) { s_st.sql = constrain(level, 0, 19); s_st.version++; }
-}
-
 // Same trick ProScan uses: ask for mass-storage mode for a few seconds; when it
 // times out the scanner restarts, which also restarts its RTSP audio server.
 void rebootScanner() {

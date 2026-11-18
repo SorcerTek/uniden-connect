@@ -37,8 +37,7 @@ enum Page { PAGE_MAIN, PAGE_KEYS };
 static Page s_page = PAGE_MAIN;
 
 enum Action {
-  A_NONE, A_KEY, A_VOL_DN, A_VOL_UP, A_SQL_DN, A_SQL_UP,
-  A_SPK_DN, A_SPK_UP, A_SPK_MUTE, A_PAGE_KEYS, A_PAGE_MAIN,
+  A_NONE, A_KEY, A_SPK_DN, A_SPK_UP, A_SPK_MUTE, A_PAGE_KEYS, A_PAGE_MAIN,
   A_AUDIO_RECONNECT, A_REBOOT
 };
 
@@ -49,48 +48,44 @@ struct Button {
   char key;        // for A_KEY
 };
 
-// Main page: 2 rows of 6 buttons along the bottom.
-static const int BY1 = 204, BY2 = 264, BH = 54, BW = 76, BG = 4;
-#define COL(i) (2 + (i) * (BW + BG))
+// Main page: one row along the bottom - board speaker controls and KEYS.
+static const int MBY = 264, MBH = 54, MBW = 116, MBG = 4;
+#define MCOL(i) (2 + (i) * (MBW + MBG))
 static const Button kMain[] = {
-  {COL(0), BY1, BW, BH, "SYSTEM", A_KEY, 'A'},
-  {COL(1), BY1, BW, BH, "DEPT",   A_KEY, 'B'},
-  {COL(2), BY1, BW, BH, "CHAN",   A_KEY, 'C'},
-  {COL(3), BY1, BW, BH, "AVOID",  A_KEY, 'L'},
-  {COL(4), BY1, BW, BH, "FUNC",   A_KEY, 'F'},
-  {COL(5), BY1, BW, BH, "KEYS",   A_PAGE_KEYS, 0},
-  {COL(0), BY2, BW, BH, "VOL -",  A_VOL_DN, 0},
-  {COL(1), BY2, BW, BH, "VOL +",  A_VOL_UP, 0},
-  {COL(2), BY2, BW, BH, "SQ -",   A_SQL_DN, 0},
-  {COL(3), BY2, BW, BH, "SQ +",   A_SQL_UP, 0},
-  {COL(4), BY2, BW, BH, "REPLAY", A_KEY, 'Y'},
-  {COL(5), BY2, BW, BH, "MUTE",   A_SPK_MUTE, 0},
+  {MCOL(0), MBY, MBW, MBH, "SPK -", A_SPK_DN, 0},
+  {MCOL(1), MBY, MBW, MBH, "SPK +", A_SPK_UP, 0},
+  {MCOL(2), MBY, MBW, MBH, "MUTE",  A_SPK_MUTE, 0},
+  {MCOL(3), MBY, MBW, MBH, "KEYS",  A_PAGE_KEYS, 0},
 };
 
-// Keys page: keypad on the left, navigation on the right.
-static const int KW = 76, KH = 56, KG = 4, KY = 30;
-#define KX(i) (2 + (i) * (KW + KG))
+// Keys page: every scanner button. 6 columns x 5 rows, under a 26 px header.
+static const int KW = 76, KH = 55, KG = 3, KY = 28;
+#define KX(i) (2 + (i) * (KW + KG + 1))
 #define KYR(r) (KY + (r) * (KH + KG))
+static const int KW3 = 3 * KW + 2 * (KG + 1);   // width of a 3-column button
 static const Button kKeys[] = {
+  // left: number pad
   {KX(0), KYR(0), KW, KH, "1", A_KEY, '1'}, {KX(1), KYR(0), KW, KH, "2", A_KEY, '2'}, {KX(2), KYR(0), KW, KH, "3", A_KEY, '3'},
   {KX(0), KYR(1), KW, KH, "4", A_KEY, '4'}, {KX(1), KYR(1), KW, KH, "5", A_KEY, '5'}, {KX(2), KYR(1), KW, KH, "6", A_KEY, '6'},
   {KX(0), KYR(2), KW, KH, "7", A_KEY, '7'}, {KX(1), KYR(2), KW, KH, "8", A_KEY, '8'}, {KX(2), KYR(2), KW, KH, "9", A_KEY, '9'},
   {KX(0), KYR(3), KW, KH, ".", A_KEY, '.'}, {KX(1), KYR(3), KW, KH, "0", A_KEY, '0'}, {KX(2), KYR(3), KW, KH, "E/YES", A_KEY, 'E'},
-  {KX(3), KYR(0), KW, KH, "MENU",  A_KEY, 'M'},
-  {KX(4), KYR(0), KW, KH, "FUNC",  A_KEY, 'F'},
-  {KX(5), KYR(0), KW, KH, "BACK",  A_PAGE_MAIN, 0},
-  {KX(3), KYR(1), KW, KH, "<",     A_KEY, '<'},
-  {KX(4), KYR(1), KW, KH, "PUSH",  A_KEY, '^'},
-  {KX(5), KYR(1), KW, KH, ">",     A_KEY, '>'},
-  {KX(3), KYR(2), KW, KH, "ZIP",   A_KEY, 'Z'},
-  {KX(4), KYR(2), KW, KH, "RANGE", A_KEY, 'R'},
-  {KX(5), KYR(2), KW, KH, "AVOID", A_KEY, 'L'},
-  {KX(3), KYR(3), KW, KH, "SPK -", A_SPK_DN, 0},
-  {KX(4), KYR(3), KW, KH, "SPK +", A_SPK_UP, 0},
-  {KX(5), KYR(3), KW, KH, "MUTE",  A_SPK_MUTE, 0},
-  // Bottom row: recovery tools
-  {KX(0), KYR(4), 3 * KW + 2 * KG, 44, "RECONNECT AUDIO", A_AUDIO_RECONNECT, 0},
-  {KX(3), KYR(4), 3 * KW + 2 * KG, 44, "REBOOT SCANNER",  A_REBOOT, 0},
+  // right: scanner keys
+  {KX(3), KYR(0), KW, KH, "SYSTEM", A_KEY, 'A'},
+  {KX(4), KYR(0), KW, KH, "DEPT",   A_KEY, 'B'},
+  {KX(5), KYR(0), KW, KH, "CHAN",   A_KEY, 'C'},
+  {KX(3), KYR(1), KW, KH, "<",      A_KEY, '<'},
+  {KX(4), KYR(1), KW, KH, "PUSH",   A_KEY, '^'},
+  {KX(5), KYR(1), KW, KH, ">",      A_KEY, '>'},
+  {KX(3), KYR(2), KW, KH, "MENU",   A_KEY, 'M'},
+  {KX(4), KYR(2), KW, KH, "FUNC",   A_KEY, 'F'},
+  {KX(5), KYR(2), KW, KH, "AVOID",  A_KEY, 'L'},
+  {KX(3), KYR(3), KW, KH, "ZIP",    A_KEY, 'Z'},
+  {KX(4), KYR(3), KW, KH, "RANGE",  A_KEY, 'R'},
+  {KX(5), KYR(3), KW, KH, "REPLAY", A_KEY, 'Y'},
+  // bottom row: recovery tools and BACK
+  {KX(0), KYR(4), KW3, KH, "RECONNECT AUDIO", A_AUDIO_RECONNECT, 0},
+  {KX(3), KYR(4), 2 * KW + KG + 1, KH, "REBOOT SCANNER", A_REBOOT, 0},
+  {KX(5), KYR(4), KW, KH, "BACK",   A_PAGE_MAIN, 0},
 };
 
 // Reboot needs a second tap within this window.
@@ -174,12 +169,9 @@ static void drawStatusBar() {
   s_canvas.fillCircle(100, 12, 5, ac);
   String a = AudioOut::muted() ? String("muted") : String(RtspAudio::status());
 
-  // vol / squelch / speaker
+  // board speaker volume
   char buf[48];
-  snprintf(buf, sizeof(buf), "VOL %s  SQ %s  SPK %d%%",
-           st.vol >= 0 ? String(st.vol).c_str() : "-",
-           st.sql >= 0 ? String(st.sql).c_str() : "-",
-           AudioOut::volume());
+  snprintf(buf, sizeof(buf), "SPK %d%%", AudioOut::volume());
   // audio status, cut short so it never runs into the levels text
   int levelsLeft = (W - 110) - s_canvas.textWidth(buf);
   fitText(a, 110, 4, levelsLeft - 8 - 110, &fonts::Font2, C_DIM);
@@ -219,32 +211,38 @@ static void drawMainInfo() {
   // System
   fitText(st.system.length() ? st.system : st.mode, 10, y, 400, &fonts::FreeSans12pt7b, C_SYS);
   if (st.sysHold) { s_canvas.setFont(&fonts::Font2); s_canvas.setTextColor(C_HOLD); s_canvas.drawString("HOLD", 425, y + 4); }
-  y += 32;
+  y += 33;
   // Department
   fitText(st.department, 10, y, 400, &fonts::FreeSans12pt7b, C_DEPT);
   if (st.deptHold) { s_canvas.setFont(&fonts::Font2); s_canvas.setTextColor(C_HOLD); s_canvas.drawString("HOLD", 425, y + 4); }
-  y += 34;
+  y += 35;
   // Channel (big)
   fitText(st.channel.length() ? st.channel : String("Scanning..."), 10, y, 400, &fonts::FreeSansBold18pt7b,
           st.sig > 0 ? C_TEXT : C_DIM);
   if (st.chanHold) { s_canvas.setFont(&fonts::Font2); s_canvas.setTextColor(C_HOLD); s_canvas.drawString("HOLD", 425, y + 10); }
-  y += 46;
+  y += 48;
 
-  // Frequency / TGID line
+  // Frequency / modulation line. The scanner's TGID value already includes the word "TGID",
+  // and is "TGID None" (or similar) on conventional channels - skip it then.
   String line;
-  if (st.tgid.length()) line += "TGID " + st.tgid + "   ";
+  String tg = st.tgid; tg.trim();
+  if (tg.length() && tg.indexOf("None") < 0) line += tg + "   ";
   if (st.freq.length()) { String f = st.freq; f.trim(); line += f + "   "; }
-  if (st.mod.length()) line += st.mod + "   ";
-  if (st.service.length()) line += st.service;
+  if (st.mod.length()) line += st.mod;
   fitText(line, 10, y, 460, &fonts::Font4, C_TEXT);
   y += 30;
 
-  // Site / scanner info line
+  // Service type
+  if (st.service.length()) { fitText(st.service, 10, y, 460, &fonts::Font4, C_DIM); y += 30; }
+
+  // Site / signal / scanner info
   String sub;
   if (st.site.length()) sub += "Site: " + st.site + "   ";
-  if (st.rssi.length()) sub += "RSSI " + st.rssi + "   ";
+  String rssi = st.rssi; rssi.trim();
+  if (rssi.length() && rssi != "-999") sub += "RSSI " + rssi + "   ";
   if (st.info1.length()) sub += st.info1;
-  fitText(sub, 10, y, 460, &fonts::Font2, C_DIM);
+  if (sub.length()) { fitText(sub, 10, y, 460, &fonts::Font2, C_DIM); y += 20; }
+  if (st.info2.length() && y < 244) fitText(st.info2, 10, y, 460, &fonts::Font2, C_DIM);
 
   // Scanner pop-up (e.g. "Quick Save?") as an overlay
   if (st.popup.length()) {
@@ -326,13 +324,8 @@ static int hitTest(int x, int y) {
 }
 
 static void doAction(const Button& b, bool longPress) {
-  const auto& st = Sds200::status();
   switch (b.action) {
     case A_KEY: Sds200::key(b.key, longPress ? 'L' : 'P'); break;
-    case A_VOL_DN: if (st.vol >= 0) Sds200::setVolume(st.vol - 1); break;
-    case A_VOL_UP: if (st.vol >= 0) Sds200::setVolume(st.vol + 1); break;
-    case A_SQL_DN: if (st.sql >= 0) Sds200::setSquelch(st.sql - 1); break;
-    case A_SQL_UP: if (st.sql >= 0) Sds200::setSquelch(st.sql + 1); break;
     case A_SPK_DN: AudioOut::setVolume(AudioOut::volume() - 10); toast(String("Speaker ") + AudioOut::volume() + "%"); break;
     case A_SPK_UP: AudioOut::setVolume(AudioOut::volume() + 10); toast(String("Speaker ") + AudioOut::volume() + "%"); break;
     case A_SPK_MUTE: AudioOut::setMuted(!AudioOut::muted()); break;
