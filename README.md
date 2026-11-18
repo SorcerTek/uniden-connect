@@ -79,6 +79,9 @@ if the board shows "PLAY failed" or "SETUP failed".
 **KEYS screen**: number pad, E/YES, MENU, FUNC, the scroll knob (< PUSH >), ZIP, RANGE, AVOID,
 board speaker volume, and BACK.
 
+**Battery**: the battery icon at the top right shows the battery level; "--" means there is no battery
+reading. If the % looks off, adjust `BATTERY_DIVIDER` in `include/config.h`.
+
 ---
 
 ## Troubleshooting

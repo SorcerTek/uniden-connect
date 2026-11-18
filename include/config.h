@@ -61,3 +61,8 @@
 #define PIN_I2S_WS    21
 #define PIN_I2S_DOUT  15
 #define PIN_AMP_EN    1    // speaker amplifier enable, active LOW
+
+// Battery sense (ADC) through a resistor divider
+#define PIN_BATTERY_ADC  8
+#define BATTERY_DIVIDER  2.0f  // adjust if the battery % looks wrong
+#define BATTERY_DEBUG    0     // 1 = print battery mV / % on the Serial Monitor each second

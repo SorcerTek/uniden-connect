@@ -17,6 +17,7 @@
 #include "rtsp_audio.h"
 #include "sds200.h"
 #include "ui.h"
+#include "battery.h"
 
 void setup() {
   Serial.begin(115200);
@@ -32,6 +33,7 @@ void setup() {
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);
   if (!Touch::begin()) Serial.println("Touch controller not found");
   if (!AudioOut::begin()) Serial.println("Audio init failed");
+  Battery::begin();
 
   Ui::showMessage("Connecting to Wi-Fi", WIFI_SSID);
   WiFi.mode(WIFI_STA);
@@ -56,6 +58,7 @@ void setup() {
 
 void loop() {
   Sds200::loop();
+  Battery::loop();
   Ui::loop();
   delay(2);
 }

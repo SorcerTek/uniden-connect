@@ -5,6 +5,7 @@
 #include "sds200.h"
 #include "rtsp_audio.h"
 #include "audio_out.h"
+#include "battery.h"
 #include <WiFi.h>
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
@@ -137,6 +138,25 @@ static void drawButton(const Button& b, bool down, bool highlight) {
   s_canvas.setTextDatum(textdatum_t::top_left);
 }
 
+// Battery icon: 20x12 outline + 2x6 nub at (x, y), percentage in Font0 to its right.
+static void drawBattery(int x, int y) {
+  int pct = Battery::percent();
+  s_canvas.drawRect(x, y, 20, 12, C_TEXT);
+  s_canvas.fillRect(x + 20, y + 3, 2, 6, C_TEXT);
+  if (pct >= 0) {
+    uint16_t c = pct > 40 ? C_OK : pct > 15 ? C_DEPT : C_BAD;
+    int fw = (16 * pct + 50) / 100;
+    if (fw > 0) s_canvas.fillRect(x + 2, y + 2, fw, 8, c);
+  }
+  s_canvas.setFont(&fonts::Font0);
+  s_canvas.setTextDatum(textdatum_t::middle_left);
+  s_canvas.setTextColor(pct >= 0 ? C_TEXT : C_DIM);
+  char buf[8];
+  if (pct >= 0) snprintf(buf, sizeof(buf), "%d%%", pct); else strcpy(buf, "--");
+  s_canvas.drawString(buf, x + 25, y + 6);
+  s_canvas.setTextDatum(textdatum_t::top_left);
+}
+
 static void drawStatusBar() {
   const auto& st = Sds200::status();
   s_canvas.fillRect(0, 0, W, 24, C_PANEL);
@@ -164,8 +184,11 @@ static void drawStatusBar() {
            AudioOut::volume());
   s_canvas.setTextColor(C_TEXT);
   s_canvas.setTextDatum(textdatum_t::top_right);
-  s_canvas.drawString(buf, W - 50, 4);
+  s_canvas.drawString(buf, W - 110, 4);
   s_canvas.setTextDatum(textdatum_t::top_left);
+
+  // battery (x 376..425, between the levels text and the signal bars)
+  drawBattery(W - 104, 6);
 
   // signal bars (Sig 0-4)
   for (int i = 0; i < 4; i++) {
@@ -241,13 +264,14 @@ static void drawKeysHeader() {
   const auto& st = Sds200::status();
   s_canvas.fillRect(0, 0, W, 26, C_PANEL);
   String l = st.channel.length() ? st.channel : st.mode;
-  fitText(l, 6, 5, 300, &fonts::Font2, C_TEXT);
-  if (st.popup.length()) fitText(st.popup, 310, 5, 165, &fonts::Font2, C_DEPT);
+  fitText(l, 6, 5, 250, &fonts::Font2, C_TEXT);
+  if (st.popup.length()) fitText(st.popup, 262, 5, 150, &fonts::Font2, C_DEPT);
   else {
     char buf[32];
     snprintf(buf, sizeof(buf), "SPK %d%%%s", AudioOut::volume(), AudioOut::muted() ? " (muted)" : "");
-    fitText(buf, 330, 5, 145, &fonts::Font2, C_DIM);
+    fitText(buf, 282, 5, 130, &fonts::Font2, C_DIM);
   }
+  drawBattery(W - 56, 7);   // top right, x 424..473
 }
 
 static void redraw() {
