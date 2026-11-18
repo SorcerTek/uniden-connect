@@ -6,6 +6,7 @@
 #include "rtsp_audio.h"
 #include "audio_out.h"
 #include "battery.h"
+#include "power.h"
 #include <WiFi.h>
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
@@ -33,12 +34,13 @@ static const uint16_t C_BAD = 0xF800;     // red
 static const uint16_t C_HOLD = 0xFD20;    // orange
 
 // ---------- buttons ----------
-enum Page { PAGE_MAIN, PAGE_KEYS };
+enum Page { PAGE_MAIN, PAGE_KEYS, PAGE_POWER };
 static Page s_page = PAGE_MAIN;
+static Page s_pageBeforePower = PAGE_MAIN;
 
 enum Action {
   A_NONE, A_KEY, A_SPK_DN, A_SPK_UP, A_SPK_MUTE, A_PAGE_KEYS, A_PAGE_MAIN,
-  A_AUDIO_RECONNECT, A_REBOOT
+  A_AUDIO_RECONNECT, A_REBOOT, A_POWER_OFF, A_RESTART, A_POWER_CANCEL
 };
 
 struct Button {
@@ -88,6 +90,13 @@ static const Button kKeys[] = {
   {KX(5), KYR(4), KW, KH, "BACK",   A_PAGE_MAIN, 0},
 };
 
+// Power menu (hold BOOT): three big buttons.
+static const Button kPower[] = {
+  {16,  120, 144, 120, "POWER OFF", A_POWER_OFF, 0},
+  {168, 120, 144, 120, "RESTART",   A_RESTART, 0},
+  {320, 120, 144, 120, "CANCEL",    A_POWER_CANCEL, 0},
+};
+
 // Reboot needs a second tap within this window.
 static const uint32_t REBOOT_CONFIRM_MS = 4000;
 static uint32_t s_rebootArmedUntil = 0;
@@ -95,6 +104,7 @@ static bool rebootArmed() { return s_rebootArmedUntil && millis() < s_rebootArme
 
 static const Button* buttons(size_t& n) {
   if (s_page == PAGE_MAIN) { n = sizeof(kMain) / sizeof(kMain[0]); return kMain; }
+  if (s_page == PAGE_POWER) { n = sizeof(kPower) / sizeof(kPower[0]); return kPower; }
   n = sizeof(kKeys) / sizeof(kKeys[0]);
   return kKeys;
 }
@@ -124,7 +134,8 @@ static void fitText(const String& txt, int x, int y, int maxW, const lgfx::IFont
 
 static void drawButton(const Button& b, bool down, bool highlight) {
   bool armed = b.action == A_REBOOT && rebootArmed();
-  s_canvas.fillRoundRect(b.x, b.y, b.w, b.h, 8, down ? C_BTN_DOWN : armed ? C_BAD : C_BTN);
+  uint16_t bg = down ? C_BTN_DOWN : (armed || b.action == A_POWER_OFF) ? C_BAD : C_BTN;
+  s_canvas.fillRoundRect(b.x, b.y, b.w, b.h, 8, bg);
   if (highlight) s_canvas.drawRoundRect(b.x, b.y, b.w, b.h, 8, C_HOLD);
   s_canvas.setFont(&fonts::Font2);
   s_canvas.setTextColor(C_TEXT);
@@ -273,6 +284,17 @@ static void drawKeysHeader() {
   drawBattery(W - 56, 7);   // top right, x 424..473
 }
 
+static void drawPowerHeader() {
+  s_canvas.setTextDatum(textdatum_t::middle_center);
+  s_canvas.setFont(&fonts::FreeSansBold18pt7b);
+  s_canvas.setTextColor(C_TEXT);
+  s_canvas.drawString("Power", W / 2, 50);
+  s_canvas.setFont(&fonts::Font2);
+  s_canvas.setTextColor(C_DIM);
+  s_canvas.drawString("After POWER OFF, press BOOT to turn it back on", W / 2, 85);
+  s_canvas.setTextDatum(textdatum_t::top_left);
+}
+
 static void redraw() {
   s_canvas.fillScreen(C_BG);
   const auto& st = Sds200::status();
@@ -281,8 +303,10 @@ static void redraw() {
   if (s_page == PAGE_MAIN) {
     drawStatusBar();
     drawMainInfo();
-  } else {
+  } else if (s_page == PAGE_KEYS) {
     drawKeysHeader();
+  } else {
+    drawPowerHeader();
   }
   for (size_t i = 0; i < n; i++) {
     bool hl = false;
@@ -331,6 +355,16 @@ static void doAction(const Button& b, bool longPress) {
     case A_SPK_MUTE: AudioOut::setMuted(!AudioOut::muted()); break;
     case A_PAGE_KEYS: s_page = PAGE_KEYS; break;
     case A_PAGE_MAIN: s_page = PAGE_MAIN; break;
+    case A_POWER_CANCEL: s_page = s_pageBeforePower; break;
+    case A_POWER_OFF:
+      showMessage("Powering off...", "Press BOOT to turn on");
+      delay(800);
+      Power::off();
+      break;
+    case A_RESTART:
+      showMessage("Restarting...");
+      Power::restart();
+      break;
     case A_AUDIO_RECONNECT: RtspAudio::reconnect(); toast("Reconnecting audio"); break;
     case A_REBOOT:
       if (rebootArmed()) {
@@ -436,6 +470,15 @@ void loop() {
     lastTouch = millis();
     handleTouch();
   }
+
+  // BOOT button: hold for the power menu; a short press closes it.
+  if (Power::bootHeld() && s_page != PAGE_POWER) {
+    s_pageBeforePower = s_page;
+    s_page = PAGE_POWER;
+    s_pressed = -1;
+    s_dirty = true;
+  }
+  if (Power::bootPressed() && s_page == PAGE_POWER) { s_page = s_pageBeforePower; s_dirty = true; }
 
   uint32_t v = Sds200::status().version;
   if (v != s_lastVersion) { s_lastVersion = v; s_dirty = true; }

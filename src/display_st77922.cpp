@@ -164,6 +164,13 @@ bool begin() {
 
 void setBacklight(bool on) { digitalWrite(PIN_LCD_BL, on ? HIGH : LOW); }
 
+void sleep() {
+  setBacklight(false);
+  writeReg(0x28, nullptr, 0);   // DISPOFF
+  writeReg(0x10, nullptr, 0);   // SLPIN
+  delay(120);
+}
+
 void pushFrame(const uint16_t* pixels) {
   const uint8_t* src = (const uint8_t*)pixels;
   for (int y = 0; y < LCD_NATIVE_H; y += BAND_ROWS) {

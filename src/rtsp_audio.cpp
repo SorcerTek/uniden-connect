@@ -25,9 +25,17 @@ static void setStatus(const char* s) {
 }
 
 static volatile bool s_reconnect = false;
+static volatile bool s_shutdown = false;
+static volatile bool s_stopped = false;
 
 bool connected() { return s_connected; }
 void reconnect() { s_reconnect = true; }
+void shutdown(uint32_t waitMs) {
+  s_shutdown = true;
+  s_reconnect = true;
+  uint32_t start = millis();
+  while (!s_stopped && millis() - start < waitMs) delay(10);
+}
 
 // Wait up to ms, returning early if a reconnect was requested.
 static void waitOrReconnect(uint32_t ms) {
@@ -260,6 +268,7 @@ static void rtspTask(void*) {
 
   uint32_t backoffS = 3;
   for (;;) {
+    if (s_shutdown) { s_stopped = true; vTaskDelete(nullptr); }
     if (WiFi.status() != WL_CONNECTED) { setStatus("waiting for Wi-Fi"); delay(1000); continue; }
     s_reconnect = false;
     if (!startSession(s)) {

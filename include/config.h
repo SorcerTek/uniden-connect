@@ -62,6 +62,10 @@
 #define PIN_I2S_DOUT  15
 #define PIN_AMP_EN    1    // speaker amplifier enable, active LOW
 
+// BOOT button: hold it this long to open the power menu (POWER OFF / RESTART)
+#define PIN_BOOT_BTN  0
+#define POWER_HOLD_MS 1500
+
 // Battery sense (ADC) through a resistor divider
 #define PIN_BATTERY_ADC  8
 #define BATTERY_DIVIDER  2.0f  // adjust if the battery % looks wrong

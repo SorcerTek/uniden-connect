@@ -9,5 +9,6 @@ bool connected();             // RTSP session is up
 const char* status();         // short human-readable state for the screen
 const char* codecName();      // e.g. "PCMU/8000"
 void reconnect();             // drop the session and start a fresh one now
+void shutdown(uint32_t waitMs = 1500);  // TEARDOWN the session and stop for good (power off / restart)
 
 }  // namespace RtspAudio

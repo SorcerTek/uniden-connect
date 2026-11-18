@@ -18,8 +18,10 @@
 #include "sds200.h"
 #include "ui.h"
 #include "battery.h"
+#include "power.h"
 
 void setup() {
+  Power::begin();                    // release pins held during power-off sleep
   Serial.begin(115200);
   delay(200);
   Serial.println("\nUniden Connect starting");

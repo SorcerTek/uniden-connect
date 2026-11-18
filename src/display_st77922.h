@@ -10,6 +10,7 @@ namespace St77922 {
 
 bool begin();                       // init SPI bus + panel, turn backlight on
 void setBacklight(bool on);
+void sleep();                       // panel off + sleep-in (before deep sleep)
 
 // Send a full native-orientation (320x480) RGB565 frame.
 // `pixels` is big-endian RGB565 (high byte first), as LovyanGFX sprites store it.
