@@ -35,6 +35,9 @@ const Status& status();
 
 void sendRaw(const char* cmd);  // without trailing \r
 void key(char code, char mode = 'P');   // KEY,<code>,<mode>  (P = press, L = long press)
+String takeError();             // last error reply to a mode command, then clears it ("" if none)
+bool inWeather();               // scanner is in WX (NOAA weather) mode
+void weather(bool on);          // on: JPM,WX_MODE,NORMAL (scans the NOAA channels); off: back to scan mode
 void rebootScanner();           // MSM,<n>: brief USB mass-storage mode, then the scanner restarts
 
 }  // namespace Sds200

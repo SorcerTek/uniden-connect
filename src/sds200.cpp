@@ -35,6 +35,16 @@ void key(char code, char mode) {
   s_lastPoll = 0;   // refresh status soon
 }
 
+static String s_error;
+String takeError() { String e = s_error; s_error = ""; return e; }
+
+bool inWeather() { return s_st.mode.indexOf("WX") >= 0; }
+
+void weather(bool on) {
+  sendRaw(on ? "JPM,WX_MODE,NORMAL" : "JPM,SCN_MODE,0");
+  log_w("weather %s", on ? "on" : "off");
+}
+
 // Same trick ProScan uses: ask for mass-storage mode for a few seconds; when it
 // times out the scanner restarts, which also restarts its RTSP audio server.
 void rebootScanner() {
@@ -110,7 +120,12 @@ static void parseGsi(const String& xml) {
                                    "CcHitsChannel", "ToneOutChannel", "WxChannel"};
   String cel;
   for (auto t : chanTags) { cel = element(xml, t); if (cel.length()) break; }
-  set(s_st.channel, attr(cel, "Name"), ch);
+  String name = attr(cel, "Name");
+  if (name.length() == 0 && cel.startsWith("<WxChannel")) {
+    String no = attr(cel, "CH_No");
+    name = "NOAA Weather" + (no.length() ? " ch " + no : String(""));
+  }
+  set(s_st.channel, name, ch);
   String f = attr(cel, "Freq");
   set(s_st.freq, f, ch);
   set(s_st.tgid, attr(cel, "TGID"), ch);
@@ -153,6 +168,11 @@ static void handlePacket(const char* data, int len) {
       parseGsi(s_xml);
       s_xml = "";
     }
+    return;
+  }
+  if (pkt.startsWith("JPM,")) {
+    pkt.trim();
+    if (pkt != "JPM,OK") s_error = "Scanner: " + pkt;
     return;
   }
   if (pkt.startsWith("MDL,")) {

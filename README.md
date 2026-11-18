@@ -61,7 +61,7 @@ On the SDS200, make sure the network is set up and it has the IP **192.168.1.2**
 
 | What | How | Port |
 |---|---|---|
-| Status and key presses | UDP "virtual serial" commands (`GSI`, `KEY`, `MSM`) | 50536 |
+| Status and key presses | UDP "virtual serial" commands (`GSI`, `KEY`, `JPM`, `MSM`) | 50536 |
 | Audio | RTSP stream `rtsp://192.168.1.2/au:scanner.au` (RTP over UDP) | 554 |
 
 Only one app can usually pull the audio stream at a time, so close ProScan / VLC / Sentinel audio
@@ -81,6 +81,9 @@ goes to the main screen anyway, which shows "Scanner not responding" until it do
 - Middle: system (blue), department (yellow), channel (big), then frequency / TGID / mode,
   service type, and site / RSSI / scanner info. An orange **HOLD** tag shows what's held.
 - Buttons: SPK - / SPK + (board speaker volume), MUTE (board speaker only), KEYS.
+- **WX** (above KEYS) puts the scanner in NOAA weather mode: it checks the weather channels and stops
+  on the one it hears, and the screen shows "NOAA Weather" with that frequency. **SCAN** (above MUTE)
+  puts it back to normal scanning. The one that's active is outlined in orange.
   The scanner's own volume and squelch are left as set on the scanner.
 
 **KEYS screen**: number pad, ".", E/YES on the left; SYSTEM, DEPT, CHAN (hold / release),

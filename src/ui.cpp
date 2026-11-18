@@ -45,7 +45,7 @@ static Page s_pageBeforePower = PAGE_MAIN;
 
 enum Action {
   A_NONE, A_KEY, A_SPK_DN, A_SPK_UP, A_SPK_MUTE, A_PAGE_KEYS, A_PAGE_MAIN,
-  A_AUDIO_RECONNECT, A_REBOOT, A_POWER_OFF, A_RESTART, A_POWER_CANCEL
+  A_AUDIO_RECONNECT, A_REBOOT, A_WX, A_SCAN, A_POWER_OFF, A_RESTART, A_POWER_CANCEL
 };
 
 struct Button {
@@ -63,7 +63,11 @@ static const Button kMain[] = {
   {MCOL(1), MBY, MBW, MBH, "SPK +", A_SPK_UP, 0},
   {MCOL(2), MBY, MBW, MBH, "MUTE",  A_SPK_MUTE, 0},
   {MCOL(3), MBY, MBW, MBH, "KEYS",  A_PAGE_KEYS, 0},
+  {MCOL(2), MBY - MBH - MBG, MBW, MBH, "SCAN", A_SCAN, 0},  // above MUTE: back to normal scanning
+  {MCOL(3), MBY - MBH - MBG, MBW, MBH, "WX",   A_WX, 0},    // above KEYS: NOAA weather
 };
+// Info lines that reach down to the SCAN / WX buttons are kept to their left.
+static const int WX_TOP = MBY - MBH - MBG, WX_LEFT = MCOL(2);
 
 // Keys page: every scanner button. 6 columns x 5 rows, under a 26 px header.
 static const int KW = 76, KH = 55, KG = 3, KY = 28;
@@ -145,7 +149,9 @@ static void drawButton(const Button& b, bool down, bool highlight) {
   s_canvas.setFont(&fonts::Font2);
   s_canvas.setTextColor(C_TEXT);
   s_canvas.setTextDatum(textdatum_t::middle_center);
-  s_canvas.drawString(armed ? "TAP AGAIN TO REBOOT" : b.label, b.x + b.w / 2, b.y + b.h / 2);
+  const char* label = b.label;
+  if (armed) label = "TAP AGAIN TO REBOOT";
+  s_canvas.drawString(label, b.x + b.w / 2, b.y + b.h / 2);
   s_canvas.setTextDatum(textdatum_t::top_left);
 }
 
@@ -245,11 +251,12 @@ static void drawMainInfo() {
   if (tg.length() && tg.indexOf("None") < 0) line += tg + "   ";
   if (st.freq.length()) { String f = st.freq; f.trim(); line += f + "   "; }
   if (st.mod.length()) line += st.mod;
-  fitText(line, 10, y, 460, &fonts::Font4, C_TEXT);
+  auto lineW = [](int y, int h) { return (y + h > WX_TOP) ? WX_LEFT - 18 : 460; };
+  fitText(line, 10, y, lineW(y, 26), &fonts::Font4, C_TEXT);
   y += 30;
 
   // Service type
-  if (st.service.length()) { fitText(st.service, 10, y, 460, &fonts::Font4, C_DIM); y += 30; }
+  if (st.service.length()) { fitText(st.service, 10, y, lineW(y, 26), &fonts::Font4, C_DIM); y += 30; }
 
   // Site / signal / scanner info
   String sub;
@@ -257,8 +264,8 @@ static void drawMainInfo() {
   String rssi = st.rssi; rssi.trim();
   if (rssi.length() && rssi != "-999") sub += "RSSI " + rssi + "   ";
   if (st.info1.length()) sub += st.info1;
-  if (sub.length()) { fitText(sub, 10, y, 460, &fonts::Font2, C_DIM); y += 20; }
-  if (st.info2.length() && y < 244) fitText(st.info2, 10, y, 460, &fonts::Font2, C_DIM);
+  if (sub.length()) { fitText(sub, 10, y, lineW(y, 16), &fonts::Font2, C_DIM); y += 20; }
+  if (st.info2.length() && y < 244) fitText(st.info2, 10, y, lineW(y, 16), &fonts::Font2, C_DIM);
 
   // Scanner pop-up (e.g. "Quick Save?") as an overlay
   if (st.popup.length()) {
@@ -319,6 +326,8 @@ static void redraw() {
     if (b[i].action == A_KEY && b[i].key == 'B') hl = st.deptHold;
     if (b[i].action == A_KEY && b[i].key == 'C') hl = st.chanHold;
     if (b[i].action == A_SPK_MUTE) hl = AudioOut::muted();
+    if (b[i].action == A_WX) hl = st.online && Sds200::inWeather();
+    if (b[i].action == A_SCAN) hl = st.online && !Sds200::inWeather();
     drawButton(b[i], (int)i == s_pressed, hl);
   }
   if (s_toast.length() && millis() < s_toastUntil) {
@@ -370,6 +379,8 @@ static void doAction(const Button& b, bool longPress) {
       showLogo("Restarting...");
       Power::restart();
       break;
+    case A_WX:   Sds200::weather(true);  toast("Weather"); break;
+    case A_SCAN: Sds200::weather(false); toast("Scanning"); break;
     case A_AUDIO_RECONNECT: RtspAudio::reconnect(); toast("Reconnecting audio"); break;
     case A_REBOOT:
       if (rebootArmed()) {
@@ -520,6 +531,10 @@ void loop() {
     s_dirty = true;
   }
   if (Power::bootPressed() && s_page == PAGE_POWER) { s_page = s_pageBeforePower; s_dirty = true; }
+
+  // Scanner said no to a mode change (e.g. JPM,NG)
+  String err = Sds200::takeError();
+  if (err.length()) toast(err);
 
   uint32_t v = Sds200::status().version;
   if (v != s_lastVersion) { s_lastVersion = v; s_dirty = true; }
