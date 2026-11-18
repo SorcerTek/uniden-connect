@@ -62,6 +62,8 @@ struct Session {
   WiFiUDP rtp;
   String base;        // rtsp://ip:port/path
   String control;     // URL for SETUP
+  String aggregate;   // URL for PLAY / OPTIONS / TEARDOWN (Content-Base or base)
+  bool setupDone = false;
   String session;     // Session id
   uint32_t timeoutS = 60;
   int cseq = 1;
@@ -162,7 +164,7 @@ static bool parseSdp(Session& s, const String& sdp, const String& contentBase) {
     }
   }
 
-  String base = contentBase.length() ? contentBase : s.base;
+  String base = s.aggregate;
   if (audioControl.length() == 0 || audioControl == "*") s.control = base;
   else if (audioControl.startsWith("rtsp://")) s.control = audioControl;
   else s.control = base + (base.endsWith("/") ? "" : "/") + audioControl;
@@ -175,7 +177,11 @@ static bool parseSdp(Session& s, const String& sdp, const String& contentBase) {
 static bool startSession(Session& s) {
   s.cseq = 1;
   s.session = "";
-  s.base = String("rtsp://") + SCANNER_IP + ":" + SCANNER_RTSP_PORT + SCANNER_RTSP_PATH;
+  s.setupDone = false;
+  // Leave the port out of the URL when it is the default (the form ProScan / VLC use).
+  if (SCANNER_RTSP_PORT == 554) s.base = String("rtsp://") + SCANNER_IP + SCANNER_RTSP_PATH;
+  else s.base = String("rtsp://") + SCANNER_IP + ":" + SCANNER_RTSP_PORT + SCANNER_RTSP_PATH;
+  s.aggregate = s.base;
 
   setStatus("connecting");
   if (!s.tcp.connect(SCANNER_IP, SCANNER_RTSP_PORT, 3000)) { setStatus("no RTSP server"); return false; }
@@ -190,7 +196,11 @@ static bool startSession(Session& s) {
   Serial.println("---- SDS200 SDP ----");
   Serial.println(body);
   Serial.println("--------------------");
-  if (!parseSdp(s, body, headerValue(hdr, "Content-Base"))) { setStatus("unknown codec"); return false; }
+  String cb = headerValue(hdr, "Content-Base");
+  cb.trim();
+  if (cb.length()) s.aggregate = cb;
+  if (!parseSdp(s, body, cb)) { setStatus("unknown codec"); return false; }
+  Serial.printf("RTSP aggregate URL: %s\nRTSP track URL: %s\n", s.aggregate.c_str(), s.control.c_str());
 
   s.rtp.stop();
   if (!s.rtp.begin(RTP_LOCAL_PORT)) { setStatus("UDP bind failed"); return false; }
@@ -198,6 +208,7 @@ static bool startSession(Session& s) {
   String transport = String("Transport: RTP/AVP;unicast;client_port=") + RTP_LOCAL_PORT + "-" + (RTP_LOCAL_PORT + 1) + "\r\n";
   code = request(s, "SETUP", s.control, transport, &hdr, nullptr);
   if (code != 200) { setStatus("SETUP failed"); log_w("SETUP -> %d\n%s", code, hdr.c_str()); return false; }
+  Serial.printf("---- SETUP response ----\n%s------------------------\n", hdr.c_str());
   String sess = headerValue(hdr, "Session");
   int semi = sess.indexOf(';');
   if (semi >= 0) {
@@ -205,10 +216,27 @@ static bool startSession(Session& s) {
     if (t >= 0) s.timeoutS = max(10, (int)sess.substring(t + 8).toInt());
     sess = sess.substring(0, semi);
   }
+  sess.trim();
   s.session = sess;
+  s.setupDone = true;
 
-  code = request(s, "PLAY", s.base, "Range: npt=0.000-\r\n", &hdr, nullptr);
-  if (code != 200) { setStatus("PLAY failed"); log_w("PLAY -> %d", code); return false; }
+  // PLAY: try a few URL / header forms, stop at the first 200.
+  struct { char tag; String url; bool range; } tries[] = {
+    {'a', s.aggregate, false},
+    {'b', s.aggregate, true},
+    {'c', s.aggregate + "/", false},
+    {'d', s.control, false},
+  };
+  bool played = false;
+  for (auto& t : tries) {
+    if (t.tag == 'c' && s.aggregate.endsWith("/")) continue;
+    code = request(s, "PLAY", t.url, t.range ? "Range: npt=0.000-\r\n" : "", &hdr, nullptr);
+    Serial.printf("RTSP PLAY (%c) %s range=%s -> %d\n", t.tag, t.url.c_str(), t.range ? "yes" : "no", code);
+    if (code == 200) { Serial.printf("PLAY OK via (%c)\n", t.tag); played = true; break; }
+    Serial.printf("%s\n", hdr.c_str());
+    if (code < 0) break;   // connection gone
+  }
+  if (!played) { setStatus("PLAY failed"); return false; }
 
   AudioOut::setStreamRate(s.rate);
   AudioOut::flush();
@@ -217,7 +245,8 @@ static bool startSession(Session& s) {
 }
 
 static void stopSession(Session& s) {
-  if (s.tcp.connected() && s.session.length()) request(s, "TEARDOWN", s.base, "", nullptr, nullptr);
+  if (s.setupDone && s.tcp.connected()) request(s, "TEARDOWN", s.aggregate, "", nullptr, nullptr);
+  s.setupDone = false;
   s.tcp.stop();
   s.rtp.stop();
   s.session = "";
@@ -229,10 +258,28 @@ static void rtspTask(void*) {
   static uint8_t pkt[1600];
   static int16_t pcm[1600];
 
+  uint32_t backoffS = 3;
   for (;;) {
     if (WiFi.status() != WL_CONNECTED) { setStatus("waiting for Wi-Fi"); delay(1000); continue; }
     s_reconnect = false;
-    if (!startSession(s)) { stopSession(s); waitOrReconnect(3000); continue; }
+    if (!startSession(s)) {
+      char why[40];
+      strncpy(why, s_status, sizeof(why) - 1);
+      why[sizeof(why) - 1] = 0;
+      stopSession(s);
+      // Back off: 3 s, doubling up to 60 s. RECONNECT AUDIO retries immediately.
+      uint32_t until = millis() + backoffS * 1000;
+      while (!s_reconnect && (int32_t)(until - millis()) > 0) {
+        char buf[40];
+        snprintf(buf, sizeof(buf), "%s, retry in %us", why, (unsigned)((until - millis() + 999) / 1000));
+        setStatus(buf);
+        delay(200);
+      }
+      if (s_reconnect) backoffS = 3;
+      else backoffS = min<uint32_t>(backoffS * 2, 60);
+      continue;
+    }
+    backoffS = 3;
     s_connected = true;
 
     uint32_t lastRtp = millis();
@@ -267,7 +314,7 @@ static void rtspTask(void*) {
 
       if (millis() - lastKeepAlive > s.timeoutS * 1000 / 2) {
         lastKeepAlive = millis();
-        if (request(s, "OPTIONS", s.base, "", nullptr, nullptr) < 0) { setStatus("RTSP lost"); break; }
+        if (request(s, "OPTIONS", s.aggregate, "", nullptr, nullptr) < 0) { setStatus("RTSP lost"); break; }
       }
       // The scanner may send nothing while squelched; only treat a long gap with
       // a dead TCP connection as a failure.

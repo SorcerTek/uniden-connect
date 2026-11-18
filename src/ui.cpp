@@ -172,9 +172,7 @@ static void drawStatusBar() {
   bool audio = AudioOut::playing();
   uint16_t ac = RtspAudio::connected() ? (audio ? C_OK : C_DIM) : C_BAD;
   s_canvas.fillCircle(100, 12, 5, ac);
-  s_canvas.setTextColor(C_DIM);
   String a = AudioOut::muted() ? String("muted") : String(RtspAudio::status());
-  s_canvas.drawString(a.c_str(), 110, 4);
 
   // vol / squelch / speaker
   char buf[48];
@@ -182,6 +180,9 @@ static void drawStatusBar() {
            st.vol >= 0 ? String(st.vol).c_str() : "-",
            st.sql >= 0 ? String(st.sql).c_str() : "-",
            AudioOut::volume());
+  // audio status, cut short so it never runs into the levels text
+  int levelsLeft = (W - 110) - s_canvas.textWidth(buf);
+  fitText(a, 110, 4, levelsLeft - 8 - 110, &fonts::Font2, C_DIM);
   s_canvas.setTextColor(C_TEXT);
   s_canvas.setTextDatum(textdatum_t::top_right);
   s_canvas.drawString(buf, W - 110, 4);
