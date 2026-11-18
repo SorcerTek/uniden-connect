@@ -92,7 +92,7 @@ board speaker volume, and BACK.
 | "Scanner not responding" | Check the scanner IP, that the board's on the same network, and that the scanner's network is on. |
 | No sound but "streaming" | Raise SPK on the KEYS page, check the speaker plug, and check the scanner's VOL isn't 0. |
 | Choppy sound | Raise `AUDIO_PREBUFFER_MS` in `include/config.h` (e.g. 500). Move the board closer to the router. |
-| Serial Monitor is blank | In `platformio.ini` change `-DARDUINO_USB_CDC_ON_BOOT=0` to `=1`, upload again. |
+| Serial Monitor is blank | Press RESET on the board after opening the monitor. Make sure `-DARDUINO_USB_CDC_ON_BOOT=1` is in `platformio.ini`. |
 
 ---
 
