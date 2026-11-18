@@ -14,6 +14,11 @@
 namespace Ui {
 
 static const int W = 480, H = 320;
+
+// Boot logo and animation, built into the firmware (see tools/make_boot_assets.sh).
+extern const uint8_t kLogoStart[] asm("_binary_data_boot_logo_jpg_start");
+extern const uint8_t kLogoEnd[]   asm("_binary_data_boot_logo_jpg_end");
+extern const uint8_t kAnimStart[] asm("_binary_data_boot_anim_bin_start");
 static LGFX_Sprite s_canvas;
 
 // Mapping from logical (landscape) to physical (portrait) pixels, measured at boot:
@@ -357,12 +362,12 @@ static void doAction(const Button& b, bool longPress) {
     case A_PAGE_MAIN: s_page = PAGE_MAIN; break;
     case A_POWER_CANCEL: s_page = s_pageBeforePower; break;
     case A_POWER_OFF:
-      showMessage("Powering off...", "Press BOOT to turn on");
+      showLogo("Powering off - press BOOT to turn on");
       delay(800);
       Power::off();
       break;
     case A_RESTART:
-      showMessage("Restarting...");
+      showLogo("Restarting...");
       Power::restart();
       break;
     case A_AUDIO_RECONNECT: RtspAudio::reconnect(); toast("Reconnecting audio"); break;
@@ -446,6 +451,42 @@ bool begin() {
   s_canvas.setRotation(SCREEN_ROTATION);
   measureRotation();
   return true;
+}
+
+static void drawBootStatus(const char* status) {
+  if (!status || !*status) return;
+  s_canvas.setFont(&fonts::Font2);
+  s_canvas.setTextDatum(textdatum_t::bottom_center);
+  s_canvas.setTextColor(C_DIM);
+  s_canvas.drawString(status, W / 2, H - 6);
+  s_canvas.setTextDatum(textdatum_t::top_left);
+}
+
+void showLogo(const char* status) {
+  s_canvas.fillScreen(C_BG);
+  s_canvas.drawJpg(kLogoStart, kLogoEnd - kLogoStart, 0, 0);
+  drawBootStatus(status);
+  St77922::pushFrame((const uint16_t*)s_canvas.getBuffer());
+}
+
+// boot_anim.bin: "UCA1", u16 frames, u16 ms/frame, then {u32 offset, u32 length} per frame, then JPEGs.
+void bootAnimFrame(const char* status) {
+  static uint16_t frame = 0;
+  static uint32_t nextAt = 0;
+  const uint8_t* a = kAnimStart;
+  if (memcmp(a, "UCA1", 4) != 0) { showLogo(status); delay(100); return; }
+  uint16_t count = a[4] | (a[5] << 8);
+  uint16_t ms = a[6] | (a[7] << 8);
+  const uint8_t* e = a + 8 + 8 * frame;
+  uint32_t off = e[0] | (e[1] << 8) | (e[2] << 16) | ((uint32_t)e[3] << 24);
+  uint32_t len = e[4] | (e[5] << 8) | (e[6] << 16) | ((uint32_t)e[7] << 24);
+  if (!s_canvas.drawJpg(a + off, len, 0, 0)) s_canvas.drawJpg(kLogoStart, kLogoEnd - kLogoStart, 0, 0);
+  drawBootStatus(status);
+  int32_t wait = (int32_t)(nextAt - millis());
+  if (wait > 0 && wait <= ms) delay(wait);
+  St77922::pushFrame((const uint16_t*)s_canvas.getBuffer());
+  nextAt = millis() + ms;
+  frame = (frame + 1) % count;
 }
 
 void showMessage(const char* line1, const char* line2) {

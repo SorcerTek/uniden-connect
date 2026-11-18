@@ -20,6 +20,11 @@
 #define SPEAKER_VOLUME_DEFAULT 70            // 0-100, board speaker volume (separate from scanner VOL)
 
 // ---- Screen ----------------------------------------------------
+// Boot animation plays while connecting: at least this long (one pass of the
+// animation), and no longer than the timeout even if the scanner isn't answering.
+#define BOOT_ANIM_MIN_MS      3000
+#define BOOT_ANIM_TIMEOUT_MS  25000
+
 // 1 or 3. Flip between them if the picture is upside down.
 #define SCREEN_ROTATION     1
 #define LCD_SPI_HZ          40000000         // 40 MHz is the safe value for this panel
