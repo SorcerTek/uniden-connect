@@ -49,6 +49,15 @@ void setSquelch(int level) {
   if (s_st.sql >= 0) { s_st.sql = constrain(level, 0, 19); s_st.version++; }
 }
 
+// Same trick ProScan uses: ask for mass-storage mode for a few seconds; when it
+// times out the scanner restarts, which also restarts its RTSP audio server.
+void rebootScanner() {
+  char buf[16];
+  snprintf(buf, sizeof(buf), "MSM,%d", SCANNER_REBOOT_MSM_S);
+  sendRaw(buf);
+  log_w("sent %s (reboot scanner)", buf);
+}
+
 // ---------------- tiny XML attribute helpers ----------------
 static String unescape(String s) {
   s.replace("&amp;", "&");

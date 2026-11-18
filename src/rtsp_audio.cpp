@@ -24,7 +24,16 @@ static void setStatus(const char* s) {
   s_status[sizeof(s_status) - 1] = 0;
 }
 
+static volatile bool s_reconnect = false;
+
 bool connected() { return s_connected; }
+void reconnect() { s_reconnect = true; }
+
+// Wait up to ms, returning early if a reconnect was requested.
+static void waitOrReconnect(uint32_t ms) {
+  uint32_t start = millis();
+  while (!s_reconnect && millis() - start < ms) delay(20);
+}
 const char* status() { return s_status; }
 const char* codecName() { return s_codecName; }
 
@@ -222,7 +231,8 @@ static void rtspTask(void*) {
 
   for (;;) {
     if (WiFi.status() != WL_CONNECTED) { setStatus("waiting for Wi-Fi"); delay(1000); continue; }
-    if (!startSession(s)) { stopSession(s); delay(3000); continue; }
+    s_reconnect = false;
+    if (!startSession(s)) { stopSession(s); waitOrReconnect(3000); continue; }
     s_connected = true;
 
     uint32_t lastRtp = millis();
@@ -264,6 +274,7 @@ static void rtspTask(void*) {
       if (!s.tcp.connected()) { setStatus("RTSP closed"); break; }
       if (millis() - lastRtp > 120000) { setStatus("no audio, retrying"); break; }
       if (WiFi.status() != WL_CONNECTED) break;
+      if (s_reconnect) { setStatus("reconnecting"); break; }
     }
     stopSession(s);
     delay(1000);

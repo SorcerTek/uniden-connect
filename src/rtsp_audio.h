@@ -8,5 +8,6 @@ void begin();                 // starts a background task that keeps the stream 
 bool connected();             // RTSP session is up
 const char* status();         // short human-readable state for the screen
 const char* codecName();      // e.g. "PCMU/8000"
+void reconnect();             // drop the session and start a fresh one now
 
 }  // namespace RtspAudio

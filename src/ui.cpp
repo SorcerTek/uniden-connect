@@ -37,7 +37,8 @@ static Page s_page = PAGE_MAIN;
 
 enum Action {
   A_NONE, A_KEY, A_VOL_DN, A_VOL_UP, A_SQL_DN, A_SQL_UP,
-  A_SPK_DN, A_SPK_UP, A_SPK_MUTE, A_PAGE_KEYS, A_PAGE_MAIN
+  A_SPK_DN, A_SPK_UP, A_SPK_MUTE, A_PAGE_KEYS, A_PAGE_MAIN,
+  A_AUDIO_RECONNECT, A_REBOOT
 };
 
 struct Button {
@@ -86,7 +87,15 @@ static const Button kKeys[] = {
   {KX(3), KYR(3), KW, KH, "SPK -", A_SPK_DN, 0},
   {KX(4), KYR(3), KW, KH, "SPK +", A_SPK_UP, 0},
   {KX(5), KYR(3), KW, KH, "MUTE",  A_SPK_MUTE, 0},
+  // Bottom row: recovery tools
+  {KX(0), KYR(4), 3 * KW + 2 * KG, 44, "RECONNECT AUDIO", A_AUDIO_RECONNECT, 0},
+  {KX(3), KYR(4), 3 * KW + 2 * KG, 44, "REBOOT SCANNER",  A_REBOOT, 0},
 };
+
+// Reboot needs a second tap within this window.
+static const uint32_t REBOOT_CONFIRM_MS = 4000;
+static uint32_t s_rebootArmedUntil = 0;
+static bool rebootArmed() { return s_rebootArmedUntil && millis() < s_rebootArmedUntil; }
 
 static const Button* buttons(size_t& n) {
   if (s_page == PAGE_MAIN) { n = sizeof(kMain) / sizeof(kMain[0]); return kMain; }
@@ -118,12 +127,13 @@ static void fitText(const String& txt, int x, int y, int maxW, const lgfx::IFont
 }
 
 static void drawButton(const Button& b, bool down, bool highlight) {
-  s_canvas.fillRoundRect(b.x, b.y, b.w, b.h, 8, down ? C_BTN_DOWN : C_BTN);
+  bool armed = b.action == A_REBOOT && rebootArmed();
+  s_canvas.fillRoundRect(b.x, b.y, b.w, b.h, 8, down ? C_BTN_DOWN : armed ? C_BAD : C_BTN);
   if (highlight) s_canvas.drawRoundRect(b.x, b.y, b.w, b.h, 8, C_HOLD);
   s_canvas.setFont(&fonts::Font2);
   s_canvas.setTextColor(C_TEXT);
   s_canvas.setTextDatum(textdatum_t::middle_center);
-  s_canvas.drawString(b.label, b.x + b.w / 2, b.y + b.h / 2);
+  s_canvas.drawString(armed ? "TAP AGAIN TO REBOOT" : b.label, b.x + b.w / 2, b.y + b.h / 2);
   s_canvas.setTextDatum(textdatum_t::top_left);
 }
 
@@ -260,7 +270,7 @@ static void redraw() {
     drawButton(b[i], (int)i == s_pressed, hl);
   }
   if (s_toast.length() && millis() < s_toastUntil) {
-    s_canvas.fillRoundRect(140, 150, 200, 40, 8, C_BTN_DOWN);
+    s_canvas.fillRoundRect(90, 150, 300, 40, 8, C_BTN_DOWN);
     s_canvas.setTextDatum(textdatum_t::middle_center);
     s_canvas.setFont(&fonts::Font4);
     s_canvas.setTextColor(C_TEXT);
@@ -303,6 +313,17 @@ static void doAction(const Button& b, bool longPress) {
     case A_SPK_MUTE: AudioOut::setMuted(!AudioOut::muted()); break;
     case A_PAGE_KEYS: s_page = PAGE_KEYS; break;
     case A_PAGE_MAIN: s_page = PAGE_MAIN; break;
+    case A_AUDIO_RECONNECT: RtspAudio::reconnect(); toast("Reconnecting audio"); break;
+    case A_REBOOT:
+      if (rebootArmed()) {
+        s_rebootArmedUntil = 0;
+        Sds200::rebootScanner();
+        RtspAudio::reconnect();   // audio reconnects by itself once the scanner is back
+        toast("Rebooting scanner");
+      } else {
+        s_rebootArmedUntil = millis() + REBOOT_CONFIRM_MS;
+      }
+      break;
     default: break;
   }
   s_dirty = true;
@@ -401,6 +422,7 @@ void loop() {
   uint32_t v = Sds200::status().version;
   if (v != s_lastVersion) { s_lastVersion = v; s_dirty = true; }
   if (s_toast.length() && millis() >= s_toastUntil) { s_toast = ""; s_dirty = true; }
+  if (s_rebootArmedUntil && millis() >= s_rebootArmedUntil) { s_rebootArmedUntil = 0; s_dirty = true; }
 
   // Refresh at least once a second (audio indicator), and quickly on changes.
   uint32_t now = millis();

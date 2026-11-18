@@ -8,6 +8,7 @@
 #define SCANNER_CTRL_PORT   50536            // SDS200 "virtual serial" UDP port
 #define SCANNER_RTSP_PORT   554
 #define SCANNER_RTSP_PATH   "/au:scanner.au" // SDS200 audio stream path
+#define SCANNER_REBOOT_MSM_S 5               // "Reboot scanner" sends MSM,<this> (seconds in mass-storage mode)
 
 // How often to ask the scanner for its status (milliseconds)
 #define STATUS_POLL_MS      400
