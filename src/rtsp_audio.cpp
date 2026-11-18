@@ -200,13 +200,8 @@ static bool startSession(Session& s) {
   if (!s.tcp.connect(ip.c_str(), SCANNER_RTSP_PORT, 3000)) {
     // "Connection reset" = the scanner is still holding an old listener (e.g. the board
     // was reset or unplugged mid-stream). It only lets go when the scanner restarts.
-    if (errno == ECONNRESET) {
-      if (!s_busySince) s_busySince = millis();
-      setStatus("scanner busy");
-    } else {
-      s_busySince = 0;
-      setStatus("no RTSP server");
-    }
+    if (!s_busySince) s_busySince = millis();
+    setStatus(errno == ECONNRESET ? "scanner busy" : "no RTSP server");
     return false;
   }
   s_busySince = 0;

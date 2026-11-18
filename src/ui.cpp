@@ -53,7 +53,7 @@ static Page s_pageBeforePower = PAGE_MAIN;
 enum Action {
   A_NONE, A_KEY, A_SPK_DN, A_SPK_UP, A_SPK_MUTE, A_GOTO,
   A_AUDIO_RECONNECT, A_REBOOT, A_WX, A_SCAN, A_POWER_OFF, A_RESTART, A_POWER_CANCEL,
-  A_REC, A_RECENT_ROW, A_LIST_UP, A_LIST_DN, A_STOP_PLAY, A_FAV, A_ADJ,
+  A_REC, A_KEYLIGHT, A_RECENT_ROW, A_LIST_UP, A_LIST_DN, A_STOP_PLAY, A_FAV, A_ADJ,
   A_SETUP_FIELD, A_WIFI_PICK, A_WIFI_OTHER, A_WIFI_RESCAN, A_SAVE_CONNECT, A_FORGET_WIFI,
   A_KB_CHAR, A_KB_SHIFT, A_KB_MODE, A_KB_BKSP, A_KB_SHOW, A_KB_OK, A_KB_CANCEL
 };
@@ -64,8 +64,32 @@ struct Button {
   Action action;
   int arg;
   bool hl;
-  uint16_t bg;
+  uint16_t bg;     // C_BTN = normal key; C_BAD / C_DARKRED = red-lit key; C_GREENKEY = green-lit key
+  int8_t glow;     // >= 0: force this key-light colour (swatches)
 };
+
+// ---------- key backlight colours ----------
+struct KeyLight { const char* name; uint8_t r, g, b; };
+static const KeyLight kKeyLights[] = {
+  {"Amber", 255, 168, 0},   {"Orange", 255, 110, 20}, {"Red", 255, 50, 45},    {"Yellow", 255, 235, 40},
+  {"Green", 60, 255, 100},  {"Ice", 120, 230, 255},   {"Blue", 70, 140, 255},  {"Purple", 185, 105, 255},
+  {"Pink", 255, 105, 200},  {"White", 240, 244, 255},
+};
+static const int NUM_KEYLIGHTS = sizeof(kKeyLights) / sizeof(kKeyLights[0]);
+static const uint16_t C_GREENKEY = 0x0320;
+static const int KL_RED = 2, KL_GREEN = 4;
+
+// A key light at a few brightness levels (computed once per colour).
+struct Glow { uint16_t full, bright, mid, dim, faint, body, bodyTop; };
+static Glow makeGlow(int i) {
+  const KeyLight& k = kKeyLights[constrain(i, 0, NUM_KEYLIGHTS - 1)];
+  auto c = [&](int pct) { return lgfx::color565(k.r * pct / 100, k.g * pct / 100, k.b * pct / 100); };
+  // pressed body: charcoal mixed with the light colour
+  auto mix = [&](int base, int pct) { return lgfx::color565(base + k.r * pct / 100, base + k.g * pct / 100, base + k.b * pct / 100); };
+  return {c(100), c(92), c(55), c(38), c(22), mix(20, 22), mix(28, 30)};
+}
+static Glow s_glow[NUM_KEYLIGHTS];
+static void initGlows() { for (int i = 0; i < NUM_KEYLIGHTS; i++) s_glow[i] = makeGlow(i); }
 
 static std::vector<Button> s_btns;     // buttons of the page on screen (rebuilt every redraw)
 static int s_pressed = -1;
@@ -79,8 +103,8 @@ static uint32_t s_toastUntil = 0;
 
 static void toast(const String& t) { s_toast = t; s_toastUntil = millis() + 1500; s_dirty = true; }
 
-static void add(int x, int y, int w, int h, const String& label, Action a, int arg = 0, bool hl = false, uint16_t bg = C_BTN) {
-  s_btns.push_back({x, y, w, h, label, a, arg, hl, bg});
+static void add(int x, int y, int w, int h, const String& label, Action a, int arg = 0, bool hl = false, uint16_t bg = C_BTN, int8_t glow = -1) {
+  s_btns.push_back({x, y, w, h, label, a, arg, hl, bg, glow});
 }
 
 // Reboot needs a second tap within this window.
@@ -146,13 +170,52 @@ static void centerText(const String& t, int x, int y, const lgfx::IFont* font, u
   s_canvas.setTextDatum(textdatum_t::top_left);
 }
 
+// Scanner-style key: raised charcoal body with a bevel, backlit label with a halo,
+// a faint light leak around the edge. Pressed = pushed in and lit up. Active = LED bar.
+static const uint16_t K_RIM = 0x0841, K_BODY = 0x2104, K_TOP = 0x2945, K_HI = 0x4208, K_SH = 0x0000;
+
 static void drawButton(const Button& b, bool down) {
   bool armed = b.action == A_REBOOT && rebootArmed();
-  uint16_t bg = down ? C_BTN_DOWN : armed ? C_BAD : b.bg;
-  s_canvas.fillRoundRect(b.x, b.y, b.w, b.h, 8, bg);
-  if (b.hl) s_canvas.drawRoundRect(b.x, b.y, b.w, b.h, 8, C_HOLD);
+  int gi = b.glow >= 0 ? b.glow
+         : (armed || b.bg == C_BAD || b.bg == C_DARKRED) ? KL_RED
+         : b.bg == C_GREENKEY ? KL_GREEN
+         : Settings::keyColor();
+  const Glow& g = s_glow[constrain(gi, 0, NUM_KEYLIGHTS - 1)];
+  int x = b.x, y = b.y, w = b.w, h = b.h, r = 9;
+
+  s_canvas.fillRoundRect(x, y, w, h, r, K_RIM);                       // outer rim
+  if (!down) {
+    s_canvas.fillRoundRect(x + 1, y + 1, w - 2, h - 2, r - 1, K_BODY);
+    s_canvas.fillRoundRect(x + 2, y + 2, w - 4, h / 2, r - 2, K_TOP); // domed upper half
+    s_canvas.drawFastHLine(x + r, y + 1, w - 2 * r, K_HI);            // top bevel highlight
+    s_canvas.drawFastHLine(x + r, y + h - 2, w - 2 * r, K_SH);        // bottom shadow
+  } else {
+    s_canvas.fillRoundRect(x + 1, y + 1, w - 2, h - 2, r - 1, g.body);  // pushed in, lit from below
+    s_canvas.fillRoundRect(x + 2, y + h / 2, w - 4, h / 2 - 2, r - 2, g.bodyTop);
+    s_canvas.drawFastHLine(x + r, y + 1, w - 2 * r, K_SH);             // inverted bevel
+  }
+  // light leaking around the key edge
+  s_canvas.drawRoundRect(x + 1, y + 1, w - 2, h - 2, r - 1, (b.hl || down) ? g.mid : g.faint);
+  if (b.hl) {                                                         // active: lit LED bar along the top
+    s_canvas.fillRoundRect(x + 10, y + 4, w - 20, 3, 1, g.full);
+    s_canvas.drawFastHLine(x + 12, y + 7, w - 24, g.dim);
+  }
   if (b.action == A_RECENT_ROW || b.action == A_WIFI_PICK || b.action == A_FAV || b.action == A_SETUP_FIELD) return;   // drawn by the page
-  centerText(armed ? (b.w > 200 ? String("TAP AGAIN TO REBOOT") : String("TAP AGAIN")) : b.label, b.x + b.w / 2, b.y + b.h / 2, &fonts::Font2, C_TEXT);
+
+  String label = armed ? (b.w > 200 ? String("TAP AGAIN TO REBOOT") : String("TAP AGAIN")) : b.label;
+  int cx = x + w / 2, cy = y + h / 2 + (b.hl ? 2 : 0);
+  s_canvas.setFont(label.length() == 1 ? (const lgfx::IFont*)&fonts::Font4 : (const lgfx::IFont*)&fonts::Font2);   // big digits / + -
+  if (s_canvas.textWidth(label.c_str()) > w - 8) s_canvas.setFont(&fonts::Font0);   // small keys
+  s_canvas.setTextDatum(textdatum_t::middle_center);
+  uint16_t halo = (b.hl || down) ? g.mid : g.dim;
+  s_canvas.setTextColor(halo);
+  s_canvas.drawString(label.c_str(), cx - 1, cy);
+  s_canvas.drawString(label.c_str(), cx + 1, cy);
+  s_canvas.drawString(label.c_str(), cx, cy - 1);
+  s_canvas.drawString(label.c_str(), cx, cy + 1);
+  s_canvas.setTextColor(down ? C_TEXT : (b.hl ? g.full : g.bright));
+  s_canvas.drawString(label.c_str(), cx, cy);
+  s_canvas.setTextDatum(textdatum_t::top_left);
 }
 
 // Battery icon: 20x12 outline + 2x6 nub at (x, y), percentage in Font0 to its right.
@@ -206,7 +269,8 @@ static void drawStatusBar() {
   // scanner link + clock
   s_canvas.fillCircle(10, 12, 5, st.online ? C_OK : C_BAD);
   char clk[16];
-  String left = clockText(clk, sizeof(clk)) ? String(clk) : (st.model.length() ? st.model : String("SDS200"));
+  // the time once the scanner is connected; until then the scanner's name
+  String left = (st.online && clockText(clk, sizeof(clk))) ? String(clk) : (st.model.length() ? st.model : String("SDS200"));
   s_canvas.setTextColor(C_TEXT);
   s_canvas.drawString(left.c_str(), 20, 4);
 
@@ -303,7 +367,7 @@ static void pageMain() {
   add(MCOL(2), MBY, MBW, MBH, "MUTE", A_SPK_MUTE, 0, AudioOut::muted());
   add(MCOL(3), MBY, MBW, MBH, "KEYS", A_GOTO, PAGE_KEYS);
   add(MCOL(2), WX_TOP, MBW, MBH, "SCAN", A_SCAN, 0, st.online && !Sds200::inWeather());
-  if (RtspAudio::lockedOut())   // scanner still holds an old audio listener
+  if (RtspAudio::lockedOut() && st.online)   // scanner answers but refuses audio: old listener stuck
     add(MCOL(0), WX_TOP, 2 * MBW + MBG, MBH, rebootArmed() ? "TAP AGAIN TO REBOOT" : "AUDIO STUCK: REBOOT SCANNER", A_REBOOT, 0, false, C_DARKRED);
   add(MCOL(3), WX_TOP, MBW, MBH, "WX", A_WX, 0, st.online && Sds200::inWeather());
 
@@ -383,22 +447,25 @@ static void pageSettings() {
     {"Dimmed level", c.dimLevel ? String(c.dimLevel) + "%" : String("Off")},
   };
   for (int r = 0; r < 3; r++) {
-    int y = 32 + r * 50;
-    fitText(rows[r].label, 12, y + 12, 220, &fonts::Font4, C_TEXT);
-    add(250, y, 60, 44, "-", A_ADJ, r * 2);
-    centerText(rows[r].value, 355, y + 22, &fonts::Font4, C_DEPT);
-    add(400, y, 60, 44, "+", A_ADJ, r * 2 + 1);
+    int y = 30 + r * 46;
+    fitText(rows[r].label, 12, y + 10, 220, &fonts::Font4, C_TEXT);
+    add(250, y, 60, 42, "-", A_ADJ, r * 2);
+    centerText(rows[r].value, 355, y + 21, &fonts::Font4, C_DEPT);
+    add(400, y, 60, 42, "+", A_ADJ, r * 2 + 1);
   }
-  int y = 186;
-  s_canvas.setFont(&fonts::Font2);
-  String wifi = WiFi.status() == WL_CONNECTED ? "Wi-Fi: " + WiFi.SSID() + "   IP " + WiFi.localIP().toString()
+
+  // Key light: sample keys, tap one to use it
+  fitText("Key light", 12, 170, 200, &fonts::Font2, C_TEXT);
+  fitText(kKeyLights[Settings::keyColor()].name, 90, 170, 200, &fonts::Font2, s_glow[Settings::keyColor()].full);
+  for (int i = 0; i < NUM_KEYLIGHTS; i++)
+    add(2 + i * 48, 188, 44, 40, kKeyLights[i].name, A_KEYLIGHT, i, i == Settings::keyColor(), C_BTN, i);
+
+  int y = 232;
+  String wifi = WiFi.status() == WL_CONNECTED ? "Wi-Fi: " + WiFi.SSID() + "  IP " + WiFi.localIP().toString()
                                               : String("Wi-Fi: not connected");
-  fitText(wifi, 12, y, 456, &fonts::Font2, C_DIM); y += 18;
-  fitText("Scanner: " + Settings::scannerIp(), 12, y, 456, &fonts::Font2, C_DIM); y += 18;
-  fitText(Calls::sdInfo() + (Calls::sdOk() ? (Settings::get().record ? "   recording on" : "   recording off") : String("")),
-          12, y, 456, &fonts::Font2, C_DIM); y += 18;
-  fitText(Ota::enabled() ? String("Wireless updates: ") + OTA_HOSTNAME + ".local" : String("Wireless updates: off (set an update password in WI-FI SETUP)"),
-          12, y, 456, &fonts::Font2, C_DIM);
+  fitText(wifi + "   Scanner: " + Settings::scannerIp(), 12, y, 456, &fonts::Font0, C_DIM); y += 12;
+  String sd = Calls::sdInfo() + (Calls::sdOk() ? (Settings::get().record ? ", recording on" : ", recording off") : String(""));
+  fitText(sd + "   Updates: " + (Ota::enabled() ? String(OTA_HOSTNAME) + ".local" : String("off")), 12, y, 456, &fonts::Font0, C_DIM);
 
   add(2, 262, 116, 54, "WI-FI SETUP", A_GOTO, PAGE_SETUP);
   add(122, 262, 138, 54, "RECONNECT AUDIO", A_AUDIO_RECONNECT);
@@ -487,7 +554,7 @@ static void pageSetup() {
     fitText(rows[r].value, 172, y + 13, 296, &fonts::Font2, C_DEPT);
   }
   fitText(s_setupMsg, 10, 232, 460, &fonts::Font2, s_setupMsg.startsWith("Connected") || s_setupMsg.startsWith("Saved") ? C_OK : C_HOLD);
-  add(2, 262, 200, 54, "SAVE & CONNECT", A_SAVE_CONNECT, 0, false, 0x0320);
+  add(2, 262, 200, 54, "SAVE & CONNECT", A_SAVE_CONNECT, 0, false, C_GREENKEY);
   add(206, 262, 150, 54, "FORGET WI-FI", A_FORGET_WIFI);
   add(360, 262, 118, 54, "BACK", A_GOTO, PAGE_SETTINGS);
 }
@@ -589,7 +656,7 @@ static void pageKb() {
     if (s_kbField == 1 || s_kbField == 3) add(350, R0 + 3 * RS, 128, KH2, s_kbShow ? "HIDE" : "SHOW", A_KB_SHOW);
   }
   add(2, 266, 236, 50, "CANCEL", A_KB_CANCEL);
-  add(242, 266, 236, 50, "OK", A_KB_OK, 0, false, 0x0320);
+  add(242, 266, 236, 50, "OK", A_KB_OK, 0, false, C_GREENKEY);
 }
 
 // ---------- weather alert overlay ----------
@@ -625,7 +692,7 @@ static void redraw() {
     const Button& b = s_btns[i];
     bool custom = b.action == A_RECENT_ROW || b.action == A_WIFI_PICK || b.action == A_FAV || b.action == A_SETUP_FIELD;
     if (custom) {                                   // already drawn under its text; only show the press
-      if ((int)i == s_pressed) s_canvas.drawRoundRect(b.x + 1, b.y + 1, b.w - 2, b.h - 2, 7, C_TEXT);
+      if ((int)i == s_pressed) s_canvas.drawRoundRect(b.x + 1, b.y + 1, b.w - 2, b.h - 2, 8, s_glow[Settings::keyColor()].full);
       continue;
     }
     drawButton(b, (int)i == s_pressed);
@@ -781,6 +848,7 @@ static void doAction(const Button& b, bool longPress) {
       break;
     }
     case A_ADJ: adjustSetting(b.arg / 2, (b.arg % 2) ? 1 : -1); break;
+    case A_KEYLIGHT: Settings::setKeyColor(b.arg); break;
     case A_SETUP_FIELD:
       if (b.arg == 0) { scanWifi(); s_page = PAGE_WIFI; }
       else openKeyboard(b.arg);
@@ -924,6 +992,7 @@ bool begin() {
   if (!s_canvas.createSprite(LCD_NATIVE_W, LCD_NATIVE_H)) return false;
   s_canvas.setRotation(SCREEN_ROTATION);
   measureRotation();
+  initGlows();
   s_lastActivity = millis();
   return true;
 }
@@ -987,7 +1056,30 @@ void showMessage(const char* line1, const char* line2) {
   St77922::pushFrame((const uint16_t*)s_canvas.getBuffer());
 }
 
+// Serial debug helper: "S" sends a screenshot (raw RGB565 of the 320x480 frame buffer),
+// "P<n>" shows page n. Used for checking layouts from a computer.
+static void serialDebug() {
+  if (!Serial.available()) return;
+  int c = Serial.read();
+  if (c == 'S') {
+    Serial.write((const uint8_t*)"SHOT", 4);
+    const uint8_t* p = (const uint8_t*)s_canvas.getBuffer();
+    size_t left = LCD_NATIVE_W * LCD_NATIVE_H * 2;
+    while (left) {
+      size_t n = Serial.write(p, min<size_t>(left, 512));
+      p += n; left -= n;
+      if (!n) delay(2);
+    }
+  } else if (c == 'P') {
+    uint32_t t = millis();
+    while (!Serial.available() && millis() - t < 200) delay(1);
+    int p = Serial.read() - '0';
+    if (p >= PAGE_MAIN && p <= PAGE_KB) { s_page = (Page)p; if (p == PAGE_SETUP) loadSetupFields(); s_dirty = true; }
+  }
+}
+
 void loop() {
+  serialDebug();
   static uint32_t lastTouch = 0;
   if (millis() - lastTouch >= 20) {
     lastTouch = millis();

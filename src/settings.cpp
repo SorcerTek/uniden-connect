@@ -22,6 +22,7 @@ static void defaults() {
 }
 
 static String s_ssid, s_pass, s_ip, s_ota;
+static int s_keyColor = 0;
 
 static String getStr(const char* key, const String& def) {
   Preferences p;
@@ -46,12 +47,24 @@ void setWifi(const String& ssid, const String& pw) { s_ssid = ssid; s_pass = pw;
 void forgetWifi() { setWifi("", ""); }
 void setScannerIp(const String& ip) { s_ip = ip; putStr("sip", ip); }
 void setOtaPassword(const String& pw) { s_ota = pw; putStr("otapw", pw); }
+int keyColor() { return s_keyColor; }
+void setKeyColor(int i) {
+  s_keyColor = i;
+  Preferences p;
+  if (!p.begin("uconnect", false)) return;
+  p.putUChar("keycol", (uint8_t)i);
+  p.end();
+}
 
 static void loadConnection() {
   s_ssid = getStr("ssid", "");
   s_pass = getStr("pass", "");
   s_ip = getStr("sip", SCANNER_IP);
   s_ota = getStr("otapw", "");
+  {
+    Preferences p;
+    if (p.begin("uconnect", true)) { s_keyColor = p.getUChar("keycol", 0); p.end(); }
+  }
   // First boot of this version: take the details from secrets.h if it was filled in.
 #if defined(WIFI_SSID) && defined(WIFI_PASSWORD)
   if (!s_ssid.length() && strlen(WIFI_SSID) && strcmp(WIFI_SSID, "YourWiFiName") != 0) setWifi(WIFI_SSID, WIFI_PASSWORD);

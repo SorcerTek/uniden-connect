@@ -34,6 +34,8 @@ void setWifi(const String& ssid, const String& password);
 void forgetWifi();
 void setScannerIp(const String& ip);
 void setOtaPassword(const String& pw);
+int keyColor();            // index into the UI's key-light colour list
+void setKeyColor(int i);
 
 void begin();              // load (or defaults)
 Data& get();

@@ -88,7 +88,7 @@ goes to the main screen anyway, which shows "Scanner not responding" until it do
 
 **Main screen**
 
-- Top bar: green dot = scanner answering, the time, second dot = audio stream (green while audio
+- Top bar: green dot = scanner answering, the time (shown once the scanner is connected; "SDS200" until then), second dot = audio stream (green while audio
   plays), a red **REC** while a call is being recorded, SPK = board speaker volume, battery, signal bars.
 - Middle: system (blue), department (yellow), channel (big), then frequency / TGID / mode,
   service type, and site / RSSI / scanner info. An orange **HOLD** tag shows what's held.
@@ -117,6 +117,11 @@ again or **STOP** to stop. UP / DOWN scroll. After a restart the list is filled 
 to save it (if there's no department, e.g. on a trunked system between calls, the whole system is
 saved). **Tap** a saved slot and the scanner jumps there and **holds** on that department (or system).
 Tap **SCAN** to go back to normal scanning.
+
+**Key light**: the buttons look like backlit scanner keys. Under **SETTINGS**, tap one of the ten
+sample keys (Amber, Orange, Red, Yellow, Green, Ice, Blue, Purple, Pink, White) to change the
+backlight colour; it changes straight away and is remembered. Active buttons (MUTE on, SCAN/WX,
+held SYSTEM/DEPT/CHAN, REC ON) show a lit bar along the top.
 
 **Settings**: Brightness, Dim after (Never / 30 s / 1 / 2 / 5 / 10 min) and Dimmed level (Off or
 5-50%). The screen dims when nothing has happened for that long (no signal, no channel change, no
