@@ -8,6 +8,7 @@ void begin();                 // starts a background task that keeps the stream 
 bool connected();             // RTSP session is up
 const char* status();         // short human-readable state for the screen
 const char* codecName();      // e.g. "PCMU/8000"
+bool lockedOut();             // scanner has refused us for 30 s+ (old listener stuck; reboot scanner)
 void reconnect();             // drop the session and start a fresh one now
 void shutdown(uint32_t waitMs = 1500);  // TEARDOWN the session and stop for good (power off / restart)
 

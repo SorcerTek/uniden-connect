@@ -9,11 +9,16 @@ What it does:
 - Touch buttons for the scanner's keys (on the KEYS page): System / Dept / Channel hold, Avoid,
   Func, Replay, Menu, the scroll knob (< PUSH >), number keys, Zip, Range.
   Hold a scanner button for about 1 second to send a "long press".
-- Board speaker volume and mute right on the main screen.
-- Boot animation while it connects, and a power menu on the BOOT button (no power switch needed).
+- Board speaker volume and mute right on the main screen, plus WX (NOAA weather) and SCAN.
 - Plays the scanner's audio on the board's own speaker, over Wi-Fi.
+- Logs every call, records the audio to the microSD card, and lists recent calls you can replay.
+- Weather alert banner when the NOAA 1050 Hz warning tone is heard.
+- Favorites: one tap to hold the scanner on a saved department.
+- Clock, screen dimming when idle, settings remembered across restarts.
+- On-screen Wi-Fi / scanner setup, wireless (Wi-Fi) firmware updates.
+- Boot animation while it connects, and a power menu on the BOOT button (no power switch needed).
 
-The scanner is expected at **192.168.1.2**. Change it in `include/config.h` if that ever changes.
+The scanner is expected at **192.168.1.2** by default. Change it on the board's setup screen.
 
 ---
 
@@ -32,16 +37,23 @@ The scanner is expected at **192.168.1.2**. Change it in `include/config.h` if t
 2. PlatformIO notices the project and downloads the ESP32 tools and the LovyanGFX library on its own.
    Let it finish (watch the bottom status bar).
 
-## 3. Put in your Wi-Fi details
+## 3. Wi-Fi details (on the board)
 
-Open `include/secrets.h` and change the two lines:
+You don't need to put anything in the code. The first time the board starts without saved Wi-Fi,
+it opens the **setup screen**:
 
-```c
-#define WIFI_SSID     "YourWiFiName"
-#define WIFI_PASSWORD "YourWiFiPassword"
-```
+1. Tap **Wi-Fi network**, pick your network from the list (or **OTHER...** to type a hidden one).
+2. Type the password on the on-screen keyboard (**SHOW** shows what you typed), tap **OK**.
+3. Check **Scanner IP** (default 192.168.1.2).
+4. Optional: **Update password** turns on wireless updates (see section 7).
+5. Tap **SAVE & CONNECT**. The board tries the network first and only saves it if it connects.
 
+You can come back any time: **KEYS > SETTINGS > WI-FI SETUP**. **FORGET WI-FI** clears it.
 The board must join the same network as the scanner. The ESP32 only works with **2.4 GHz** Wi-Fi.
+
+`include/secrets.h` is optional. If it's filled in, the board copies those details into its own
+memory the first time it starts. It's never uploaded to GitHub, but a compiled firmware file
+would contain it, so empty it before sharing a build with anyone.
 
 ## 4. Build and flash
 
@@ -61,7 +73,7 @@ On the SDS200, make sure the network is set up and it has the IP **192.168.1.2**
 
 | What | How | Port |
 |---|---|---|
-| Status and key presses | UDP "virtual serial" commands (`GSI`, `KEY`, `JPM`, `MSM`) | 50536 |
+| Status and key presses | UDP "virtual serial" commands (`GSI`, `KEY`, `JPM`, `HLD`, `MSM`) | 50536 |
 | Audio | RTSP stream `rtsp://192.168.1.2/au:scanner.au` (RTP over UDP) | 554 |
 
 Only one app can usually pull the audio stream at a time, so close ProScan / VLC / Sentinel audio
@@ -76,25 +88,74 @@ goes to the main screen anyway, which shows "Scanner not responding" until it do
 
 **Main screen**
 
-- Top bar: green dot = scanner answering, second dot = audio stream (green while audio plays),
-  SPK = board speaker volume, battery, bars = signal.
+- Top bar: green dot = scanner answering, the time, second dot = audio stream (green while audio
+  plays), a red **REC** while a call is being recorded, SPK = board speaker volume, battery, signal bars.
 - Middle: system (blue), department (yellow), channel (big), then frequency / TGID / mode,
   service type, and site / RSSI / scanner info. An orange **HOLD** tag shows what's held.
 - Buttons: SPK - / SPK + (board speaker volume), MUTE (board speaker only), KEYS.
-- **WX** (above KEYS) puts the scanner in NOAA weather mode: it checks the weather channels and stops
-  on the one it hears, and the screen shows "NOAA Weather" with that frequency. **SCAN** (above MUTE)
-  puts it back to normal scanning. The one that's active is outlined in orange.
   The scanner's own volume and squelch are left as set on the scanner.
+- **WX** (above KEYS) puts the scanner in NOAA weather mode: it checks the weather channels and stops
+  on the one it hears. **SCAN** (above MUTE) goes back to normal scanning and releases any
+  System / Department / Channel hold. The one that's active is outlined in orange.
+- If the scanner keeps refusing the audio connection (see Troubleshooting), a red
+  **AUDIO STUCK: REBOOT SCANNER** button appears; tap it twice.
 
 **KEYS screen**: number pad, ".", E/YES on the left; SYSTEM, DEPT, CHAN (hold / release),
-the scroll knob (< PUSH >), MENU, FUNC, AVOID, ZIP, RANGE, REPLAY on the right; along the bottom
-RECONNECT AUDIO, REBOOT SCANNER (tap twice) and BACK.
+the scroll knob (< PUSH >), MENU, FUNC, AVOID, ZIP, RANGE, REPLAY on the right. Along the bottom:
+
+- **REC ON / REC OFF**: record calls to the SD card or not (remembered).
+- **RECENT**: the last 20 calls.
+- **FAVS**: favorites.
+- **SETTINGS**: brightness, dimming, Wi-Fi setup, and the recovery buttons.
+- **BACK**.
+
+**Recent calls**: newest first, with the time, channel, department and length. Tap a call with a
+green arrow to play its recording through the speaker (live audio pauses while it plays); tap it
+again or **STOP** to stop. UP / DOWN scroll. After a restart the list is filled from today's log.
+
+**Favorites**: six slots. While the scanner is on a department you like, **hold a slot for 1 second**
+to save it (if there's no department, e.g. on a trunked system between calls, the whole system is
+saved). **Tap** a saved slot and the scanner jumps there and **holds** on that department (or system).
+Tap **SCAN** to go back to normal scanning.
+
+**Settings**: Brightness, Dim after (Never / 30 s / 1 / 2 / 5 / 10 min) and Dimmed level (Off or
+5-50%). The screen dims when nothing has happened for that long (no signal, no channel change, no
+touch) and wakes on activity or a touch. The first touch on a dim screen only wakes it.
+Below that: Wi-Fi and IP, scanner IP, SD card space, wireless update status, and the buttons
+**WI-FI SETUP**, **RECONNECT AUDIO**, **REBOOT SCANNER** (tap twice).
+
+All settings (speaker volume, mute, brightness, dimming, recording, favorites, Wi-Fi, scanner IP)
+are saved on the board and survive restarts and power-off.
+
+**Clock**: set automatically over the internet once Wi-Fi is up (US Central time; change
+`TIMEZONE` in `include/config.h` if you move).
+
+**Weather alert**: when the board hears the NOAA Weather Radio warning tone (1050 Hz for 1 second or
+more), a flashing red **WEATHER ALERT** banner covers the screen with the channel and frequency, the
+screen wakes, the board speaker un-mutes, and it beeps every few seconds until you tap the banner.
+The board can only hear the tone when the scanner is actually on the weather channel: either you've
+pressed **WX**, or you've turned on the scanner's own weather-alert priority, which makes the SDS200
+check the weather channel while it scans and switch to it when an alert starts.
+
+**microSD card** (FAT32). The board creates:
+
+```
+/logs/2026-11-18.csv                    one line per call: date, time, seconds, system, department,
+                                        channel, TGID, frequency, recording file
+/rec/2026-11-18/033540_NOAA_Weather.wav  the call's audio (8 kHz mono WAV) - opens in any audio player
+```
+
+A call is only recorded while real audio comes through: it starts when the audio is louder than
+`REC_SILENCE_RMS` (in `include/config.h`), ends after 2 seconds of silence or when the channel
+changes, and calls shorter than 1 second are thrown away. Nothing is recorded while the scanner is
+just scanning. A WAV is about 1 MB per minute, so 32 GB holds hundreds of hours. Delete old
+folders on a computer when you like.
 
 **Power (BOOT button)**: hold the board's **BOOT** button for about 1.5 seconds to open the power menu:
 
-- **POWER OFF**: closes the audio stream cleanly, turns off the screen and speaker, and puts the
-  board into deep sleep. Press **BOOT** once to turn it back on (it starts up like a fresh power-on).
-- **RESTART**: closes the audio stream cleanly and restarts the board.
+- **POWER OFF**: finishes any recording, closes the audio stream cleanly, turns off the screen and
+  speaker, and puts the board into deep sleep. Press **BOOT** once to turn it back on.
+- **RESTART**: the same clean shutdown, then a restart.
 - **CANCEL** (or a short press of BOOT) goes back.
 
 "Off" is a very low-power sleep, not a true power cut: the battery charger and screen circuitry still
@@ -102,6 +163,25 @@ draw a little. If you'll store it for weeks, unplug the battery.
 
 **Battery**: the battery icon at the top right shows the battery level; "--" means there is no battery
 reading. If the % looks off, adjust `BATTERY_DIVIDER` in `include/config.h`.
+
+## 7. Updating over Wi-Fi (no USB cable)
+
+Once the board is on Wi-Fi and has an **update password** (KEYS > SETTINGS > WI-FI SETUP), you can
+upload new firmware without plugging it in:
+
+1. Put the same password in `secrets.ini` in the project folder (copy `secrets.example.ini` if it
+   isn't there):
+   ```ini
+   [ota]
+   password = your-update-password
+   ```
+2. In VS Code's blue bottom bar, click the environment name (it says `env:fnk0104n`) and choose
+   **env:fnk0104n_ota**.
+3. Click **Upload** (→). The board shows "Updating... NN%", then restarts with the new version.
+4. Switch back to **env:fnk0104n** for USB uploads.
+
+The board must be switched on and on the same network as your Mac. It's found as
+`uniden-connect.local`. `secrets.ini` is never uploaded to GitHub.
 
 ---
 
@@ -115,7 +195,10 @@ reading. If the % looks off, adjust `BATTERY_DIVIDER` in `include/config.h`.
 | Taps land in the wrong spot | Set `TOUCH_DEBUG` to 1, watch the Serial Monitor while you tap, then try `TOUCH_INVERT_X` / `TOUCH_INVERT_Y`. |
 | "Scanner not responding" | Check the scanner IP, that the board's on the same network, and that the scanner's network is on. |
 | No sound but "streaming" | Raise SPK on the main screen, check the speaker plug, and check the scanner's volume isn't 0. |
-| "Connection reset by peer" / audio won't come back after the board was reset or unplugged | The scanner only allows one audio listener and is still holding the old one. Use **RESTART** / **POWER OFF** from the BOOT menu (they close it cleanly); otherwise tap REBOOT SCANNER on the KEYS page. |
+| "scanner busy" / audio won't come back after the board was reset or unplugged | The scanner only allows one audio listener and keeps holding the old one until it restarts. Use **RESTART** / **POWER OFF** from the BOOT menu and wireless updates (they close it cleanly). After a USB upload, a pulled battery or the RESET button, tap the red **AUDIO STUCK** button (or REBOOT SCANNER under SETTINGS). |
+| Hiss or static gets recorded | Raise `REC_SILENCE_RMS` in `include/config.h` (e.g. 500). Quiet calls missed: lower it (e.g. 200). |
+| "no SD card" | The card must be FAT32 (32 GB and smaller usually are). Re-seat it and restart the board. |
+| Wrong time | Change `TIMEZONE` in `include/config.h`. The clock needs internet access through your Wi-Fi. |
 | Want a different boot animation | Replace `Uniden Connect Bootup.gif` / `Uniden Connect boot logo.jpeg`, run `sh tools/make_boot_assets.sh` (needs ffmpeg), then build and upload. |
 | Choppy sound | Raise `AUDIO_PREBUFFER_MS` in `include/config.h` (e.g. 500). Move the board closer to the router. |
 | Serial Monitor is blank | Press RESET on the board after opening the monitor. Make sure `-DARDUINO_USB_CDC_ON_BOOT=1` is in `platformio.ini`. |
@@ -127,14 +210,18 @@ reading. If the % looks off, adjust `BATTERY_DIVIDER` in `include/config.h`.
 ```
 platformio.ini          build settings (board, memory, libraries)
 include/config.h        scanner IP, ports, screen/touch/audio options, board pins
-include/secrets.h       your Wi-Fi name and password (kept out of GitHub)
+include/secrets.h       optional first-boot Wi-Fi / update password (kept out of GitHub)
+secrets.ini             update password for wireless uploads (kept out of GitHub)
 src/main.cpp            start-up: screen, touch, audio, Wi-Fi, scanner
 src/sds200.*            talks to the scanner over UDP 50536, reads GSI status
 src/rtsp_audio.*        connects to the scanner's RTSP audio stream
 src/audio_out.*         ES8311 codec + speaker amplifier + jitter buffer
 src/display_st77922.*   driver for the ST77922 QSPI screen
 src/touch_st77922.*     driver for the screen's touch controller
-src/ui.*                screens, buttons, touch handling, boot animation
+src/ui.*                screens, buttons, touch handling, on-screen keyboard, boot animation
+src/settings.*          settings saved in the board's flash (NVS)
+src/calls.*             call detection, SD card log + recordings, replay, weather-alert tone
+src/ota.*               wireless updates
 src/power.*             BOOT button power menu (power off = deep sleep, restart)
 src/battery.*           battery level from the ADC
 data/boot_logo.jpg      boot logo, built into the firmware

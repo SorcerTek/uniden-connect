@@ -7,7 +7,13 @@
 #include "audio_out.h"
 #include "battery.h"
 #include "power.h"
+#include "settings.h"
+#include "calls.h"
+#include "ota.h"
 #include <WiFi.h>
+#include <time.h>
+#include <vector>
+#include <algorithm>
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
 
@@ -36,89 +42,33 @@ static const uint16_t C_SYS = 0x07FF;     // cyan
 static const uint16_t C_DEPT = 0xFFE0;    // yellow
 static const uint16_t C_OK = 0x07E0;      // green
 static const uint16_t C_BAD = 0xF800;     // red
+static const uint16_t C_DARKRED = 0x7800;
 static const uint16_t C_HOLD = 0xFD20;    // orange
 
-// ---------- buttons ----------
-enum Page { PAGE_MAIN, PAGE_KEYS, PAGE_POWER };
+// ---------- pages and buttons ----------
+enum Page { PAGE_MAIN, PAGE_KEYS, PAGE_POWER, PAGE_SETTINGS, PAGE_RECENT, PAGE_FAVS, PAGE_SETUP, PAGE_WIFI, PAGE_KB };
 static Page s_page = PAGE_MAIN;
 static Page s_pageBeforePower = PAGE_MAIN;
 
 enum Action {
-  A_NONE, A_KEY, A_SPK_DN, A_SPK_UP, A_SPK_MUTE, A_PAGE_KEYS, A_PAGE_MAIN,
-  A_AUDIO_RECONNECT, A_REBOOT, A_WX, A_SCAN, A_POWER_OFF, A_RESTART, A_POWER_CANCEL
+  A_NONE, A_KEY, A_SPK_DN, A_SPK_UP, A_SPK_MUTE, A_GOTO,
+  A_AUDIO_RECONNECT, A_REBOOT, A_WX, A_SCAN, A_POWER_OFF, A_RESTART, A_POWER_CANCEL,
+  A_REC, A_RECENT_ROW, A_LIST_UP, A_LIST_DN, A_STOP_PLAY, A_FAV, A_ADJ,
+  A_SETUP_FIELD, A_WIFI_PICK, A_WIFI_OTHER, A_WIFI_RESCAN, A_SAVE_CONNECT, A_FORGET_WIFI,
+  A_KB_CHAR, A_KB_SHIFT, A_KB_MODE, A_KB_BKSP, A_KB_SHOW, A_KB_OK, A_KB_CANCEL
 };
 
 struct Button {
   int x, y, w, h;
-  const char* label;
+  String label;
   Action action;
-  char key;        // for A_KEY
+  int arg;
+  bool hl;
+  uint16_t bg;
 };
 
-// Main page: one row along the bottom - board speaker controls and KEYS.
-static const int MBY = 264, MBH = 54, MBW = 116, MBG = 4;
-#define MCOL(i) (2 + (i) * (MBW + MBG))
-static const Button kMain[] = {
-  {MCOL(0), MBY, MBW, MBH, "SPK -", A_SPK_DN, 0},
-  {MCOL(1), MBY, MBW, MBH, "SPK +", A_SPK_UP, 0},
-  {MCOL(2), MBY, MBW, MBH, "MUTE",  A_SPK_MUTE, 0},
-  {MCOL(3), MBY, MBW, MBH, "KEYS",  A_PAGE_KEYS, 0},
-  {MCOL(2), MBY - MBH - MBG, MBW, MBH, "SCAN", A_SCAN, 0},  // above MUTE: back to normal scanning
-  {MCOL(3), MBY - MBH - MBG, MBW, MBH, "WX",   A_WX, 0},    // above KEYS: NOAA weather
-};
-// Info lines that reach down to the SCAN / WX buttons are kept to their left.
-static const int WX_TOP = MBY - MBH - MBG, WX_LEFT = MCOL(2);
-
-// Keys page: every scanner button. 6 columns x 5 rows, under a 26 px header.
-static const int KW = 76, KH = 55, KG = 3, KY = 28;
-#define KX(i) (2 + (i) * (KW + KG + 1))
-#define KYR(r) (KY + (r) * (KH + KG))
-static const int KW3 = 3 * KW + 2 * (KG + 1);   // width of a 3-column button
-static const Button kKeys[] = {
-  // left: number pad
-  {KX(0), KYR(0), KW, KH, "1", A_KEY, '1'}, {KX(1), KYR(0), KW, KH, "2", A_KEY, '2'}, {KX(2), KYR(0), KW, KH, "3", A_KEY, '3'},
-  {KX(0), KYR(1), KW, KH, "4", A_KEY, '4'}, {KX(1), KYR(1), KW, KH, "5", A_KEY, '5'}, {KX(2), KYR(1), KW, KH, "6", A_KEY, '6'},
-  {KX(0), KYR(2), KW, KH, "7", A_KEY, '7'}, {KX(1), KYR(2), KW, KH, "8", A_KEY, '8'}, {KX(2), KYR(2), KW, KH, "9", A_KEY, '9'},
-  {KX(0), KYR(3), KW, KH, ".", A_KEY, '.'}, {KX(1), KYR(3), KW, KH, "0", A_KEY, '0'}, {KX(2), KYR(3), KW, KH, "E/YES", A_KEY, 'E'},
-  // right: scanner keys
-  {KX(3), KYR(0), KW, KH, "SYSTEM", A_KEY, 'A'},
-  {KX(4), KYR(0), KW, KH, "DEPT",   A_KEY, 'B'},
-  {KX(5), KYR(0), KW, KH, "CHAN",   A_KEY, 'C'},
-  {KX(3), KYR(1), KW, KH, "<",      A_KEY, '<'},
-  {KX(4), KYR(1), KW, KH, "PUSH",   A_KEY, '^'},
-  {KX(5), KYR(1), KW, KH, ">",      A_KEY, '>'},
-  {KX(3), KYR(2), KW, KH, "MENU",   A_KEY, 'M'},
-  {KX(4), KYR(2), KW, KH, "FUNC",   A_KEY, 'F'},
-  {KX(5), KYR(2), KW, KH, "AVOID",  A_KEY, 'L'},
-  {KX(3), KYR(3), KW, KH, "ZIP",    A_KEY, 'Z'},
-  {KX(4), KYR(3), KW, KH, "RANGE",  A_KEY, 'R'},
-  {KX(5), KYR(3), KW, KH, "REPLAY", A_KEY, 'Y'},
-  // bottom row: recovery tools and BACK
-  {KX(0), KYR(4), KW3, KH, "RECONNECT AUDIO", A_AUDIO_RECONNECT, 0},
-  {KX(3), KYR(4), 2 * KW + KG + 1, KH, "REBOOT SCANNER", A_REBOOT, 0},
-  {KX(5), KYR(4), KW, KH, "BACK",   A_PAGE_MAIN, 0},
-};
-
-// Power menu (hold BOOT): three big buttons.
-static const Button kPower[] = {
-  {16,  120, 144, 120, "POWER OFF", A_POWER_OFF, 0},
-  {168, 120, 144, 120, "RESTART",   A_RESTART, 0},
-  {320, 120, 144, 120, "CANCEL",    A_POWER_CANCEL, 0},
-};
-
-// Reboot needs a second tap within this window.
-static const uint32_t REBOOT_CONFIRM_MS = 4000;
-static uint32_t s_rebootArmedUntil = 0;
-static bool rebootArmed() { return s_rebootArmedUntil && millis() < s_rebootArmedUntil; }
-
-static const Button* buttons(size_t& n) {
-  if (s_page == PAGE_MAIN) { n = sizeof(kMain) / sizeof(kMain[0]); return kMain; }
-  if (s_page == PAGE_POWER) { n = sizeof(kPower) / sizeof(kPower[0]); return kPower; }
-  n = sizeof(kKeys) / sizeof(kKeys[0]);
-  return kKeys;
-}
-
-static int s_pressed = -1;            // index of button under the finger
+static std::vector<Button> s_btns;     // buttons of the page on screen (rebuilt every redraw)
+static int s_pressed = -1;
 static uint32_t s_pressStart = 0;
 static bool s_longSent = false;
 static bool s_dirty = true;
@@ -127,7 +77,54 @@ static uint32_t s_lastDraw = 0;
 static String s_toast;
 static uint32_t s_toastUntil = 0;
 
-static void toast(const String& t) { s_toast = t; s_toastUntil = millis() + 1200; s_dirty = true; }
+static void toast(const String& t) { s_toast = t; s_toastUntil = millis() + 1500; s_dirty = true; }
+
+static void add(int x, int y, int w, int h, const String& label, Action a, int arg = 0, bool hl = false, uint16_t bg = C_BTN) {
+  s_btns.push_back({x, y, w, h, label, a, arg, hl, bg});
+}
+
+// Reboot needs a second tap within this window.
+static const uint32_t REBOOT_CONFIRM_MS = 4000;
+static uint32_t s_rebootArmedUntil = 0;
+static bool rebootArmed() { return s_rebootArmedUntil && millis() < s_rebootArmedUntil; }
+
+// ---------- dimming ----------
+static uint32_t s_lastActivity = 0;
+static bool s_dimmed = false;
+static int s_appliedBrightness = -1;
+static bool s_swallowTouch = false;     // first touch on a dim screen only wakes it
+
+static void activity() { s_lastActivity = millis(); }
+
+static void applyBrightness() {
+  const auto& cfg = Settings::get();
+  int want = s_dimmed ? cfg.dimLevel : cfg.brightness;
+  if (want != s_appliedBrightness) { s_appliedBrightness = want; St77922::setBrightness(want); }
+}
+
+// ---------- weather alert ----------
+static bool s_gsiAlertAck = false;
+static uint32_t s_lastBeep = 0;
+static bool gsiAlert() { return Sds200::status().wxMode.indexOf("Alert") >= 0; }
+static bool alertShowing() { return Calls::alertActive() || (gsiAlert() && !s_gsiAlertAck); }
+
+// ---------- list / setup state ----------
+static int s_recentTop = 0;
+static int s_playingRow = -1;
+
+struct Net { String ssid; int rssi; bool open; };
+static std::vector<Net> s_nets;
+static int s_netTop = 0;
+
+static bool s_firstRun = false;
+static String s_eSsid, s_ePass, s_eIp, s_eOta;   // values being edited on the SETUP page
+static String s_setupMsg;
+
+enum KbMode { KB_LOWER, KB_UPPER, KB_NUM, KB_SYM, KB_IP };
+static int s_kbField = 0;               // 0 ssid, 1 wifi password, 2 scanner ip, 3 ota password
+static KbMode s_kbMode = KB_LOWER;
+static String s_kbText;
+static bool s_kbShow = false;
 
 // ---------- drawing helpers ----------
 static void fitText(const String& txt, int x, int y, int maxW, const lgfx::IFont* font, uint16_t color) {
@@ -141,18 +138,21 @@ static void fitText(const String& txt, int x, int y, int maxW, const lgfx::IFont
   s_canvas.drawString(t.c_str(), x, y);
 }
 
-static void drawButton(const Button& b, bool down, bool highlight) {
-  bool armed = b.action == A_REBOOT && rebootArmed();
-  uint16_t bg = down ? C_BTN_DOWN : (armed || b.action == A_POWER_OFF) ? C_BAD : C_BTN;
-  s_canvas.fillRoundRect(b.x, b.y, b.w, b.h, 8, bg);
-  if (highlight) s_canvas.drawRoundRect(b.x, b.y, b.w, b.h, 8, C_HOLD);
-  s_canvas.setFont(&fonts::Font2);
-  s_canvas.setTextColor(C_TEXT);
+static void centerText(const String& t, int x, int y, const lgfx::IFont* font, uint16_t color) {
+  s_canvas.setFont(font);
+  s_canvas.setTextColor(color);
   s_canvas.setTextDatum(textdatum_t::middle_center);
-  const char* label = b.label;
-  if (armed) label = "TAP AGAIN TO REBOOT";
-  s_canvas.drawString(label, b.x + b.w / 2, b.y + b.h / 2);
+  s_canvas.drawString(t.c_str(), x, y);
   s_canvas.setTextDatum(textdatum_t::top_left);
+}
+
+static void drawButton(const Button& b, bool down) {
+  bool armed = b.action == A_REBOOT && rebootArmed();
+  uint16_t bg = down ? C_BTN_DOWN : armed ? C_BAD : b.bg;
+  s_canvas.fillRoundRect(b.x, b.y, b.w, b.h, 8, bg);
+  if (b.hl) s_canvas.drawRoundRect(b.x, b.y, b.w, b.h, 8, C_HOLD);
+  if (b.action == A_RECENT_ROW || b.action == A_WIFI_PICK || b.action == A_FAV || b.action == A_SETUP_FIELD) return;   // drawn by the page
+  centerText(armed ? (b.w > 200 ? String("TAP AGAIN TO REBOOT") : String("TAP AGAIN")) : b.label, b.x + b.w / 2, b.y + b.h / 2, &fonts::Font2, C_TEXT);
 }
 
 // Battery icon: 20x12 outline + 2x6 nub at (x, y), percentage in Font0 to its right.
@@ -174,35 +174,67 @@ static void drawBattery(int x, int y) {
   s_canvas.setTextDatum(textdatum_t::top_left);
 }
 
+static bool clockText(char* buf, size_t n, time_t t = 0) {
+  if (!t) t = time(nullptr);
+  if (t < 1700000000) return false;
+  struct tm tm;
+  localtime_r(&t, &tm);
+  int h = tm.tm_hour % 12;
+  snprintf(buf, n, "%d:%02d %s", h ? h : 12, tm.tm_min, tm.tm_hour < 12 ? "AM" : "PM");
+  return true;
+}
+
+static void drawWifiBars(int x, int y, int rssi) {
+  int bars = rssi > -55 ? 4 : rssi > -65 ? 3 : rssi > -75 ? 2 : 1;
+  for (int i = 0; i < 4; i++) {
+    int bh = 4 + i * 4;
+    s_canvas.fillRect(x + i * 7, y + 16 - bh, 5, bh, i < bars ? C_TEXT : C_DIM);
+  }
+}
+
+static void drawLock(int x, int y) {
+  s_canvas.drawRoundRect(x + 2, y, 8, 9, 3, C_TEXT);
+  s_canvas.fillRect(x, y + 6, 12, 9, C_TEXT);
+}
+
+// ---------- MAIN ----------
 static void drawStatusBar() {
   const auto& st = Sds200::status();
   s_canvas.fillRect(0, 0, W, 24, C_PANEL);
   s_canvas.setFont(&fonts::Font2);
 
-  // scanner link
+  // scanner link + clock
   s_canvas.fillCircle(10, 12, 5, st.online ? C_OK : C_BAD);
+  char clk[16];
+  String left = clockText(clk, sizeof(clk)) ? String(clk) : (st.model.length() ? st.model : String("SDS200"));
   s_canvas.setTextColor(C_TEXT);
-  String name = st.model.length() ? st.model : String("SDS200");
-  s_canvas.drawString(name.c_str(), 20, 4);
+  s_canvas.drawString(left.c_str(), 20, 4);
 
   // audio link
   bool audio = AudioOut::playing();
   uint16_t ac = RtspAudio::connected() ? (audio ? C_OK : C_DIM) : C_BAD;
   s_canvas.fillCircle(100, 12, 5, ac);
-  String a = AudioOut::muted() ? String("muted") : String(RtspAudio::status());
+  String a = Calls::replaying() ? String("replay") : AudioOut::muted() ? String("muted") : String(RtspAudio::status());
 
-  // board speaker volume
-  char buf[48];
+  // board speaker volume (right-aligned), REC to its left while recording
+  char buf[24];
   snprintf(buf, sizeof(buf), "SPK %d%%", AudioOut::volume());
-  // audio status, cut short so it never runs into the levels text
-  int levelsLeft = (W - 110) - s_canvas.textWidth(buf);
-  fitText(a, 110, 4, levelsLeft - 8 - 110, &fonts::Font2, C_DIM);
+  int right = W - 110;
+  int levelsLeft = right - s_canvas.textWidth(buf);
+  int textEnd = levelsLeft - 8;
+  if (Calls::recordingNow()) {
+    int rx = levelsLeft - 40;
+    s_canvas.fillCircle(rx + 5, 12, 5, C_BAD);
+    s_canvas.setTextColor(C_BAD);
+    s_canvas.drawString("REC", rx + 13, 4);
+    textEnd = rx - 6;
+  }
+  fitText(a, 110, 4, textEnd - 110, &fonts::Font2, C_DIM);
   s_canvas.setTextColor(C_TEXT);
   s_canvas.setTextDatum(textdatum_t::top_right);
-  s_canvas.drawString(buf, W - 110, 4);
+  s_canvas.drawString(buf, right, 4);
   s_canvas.setTextDatum(textdatum_t::top_left);
 
-  // battery (x 376..425, between the levels text and the signal bars)
   drawBattery(W - 104, 6);
 
   // signal bars (Sig 0-4)
@@ -213,8 +245,14 @@ static void drawStatusBar() {
   }
 }
 
-static void drawMainInfo() {
+// Main page: one row along the bottom plus SCAN / WX above MUTE / KEYS.
+static const int MBY = 264, MBH = 54, MBW = 116, MBG = 4;
+#define MCOL(i) (2 + (i) * (MBW + MBG))
+static const int WX_TOP = MBY - MBH - MBG, WX_LEFT = MCOL(2);
+
+static void pageMain() {
   const auto& st = Sds200::status();
+  drawStatusBar();
   int y = 30;
 
   if (!st.online) {
@@ -223,128 +261,573 @@ static void drawMainInfo() {
     s_canvas.drawString("Scanner not responding", 10, 60);
     s_canvas.setFont(&fonts::Font2);
     s_canvas.setTextColor(C_DIM);
-    String l = String("Looking for ") + SCANNER_IP + " on UDP " + SCANNER_CTRL_PORT;
+    String l = "Looking for " + Settings::scannerIp() + " on UDP " + SCANNER_CTRL_PORT;
     s_canvas.drawString(l.c_str(), 10, 100);
     String w = String("Wi-Fi: ") + (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("not connected"));
     s_canvas.drawString(w.c_str(), 10, 120);
-    return;
+    s_canvas.drawString("Scanner IP / Wi-Fi: KEYS > SETTINGS > WI-FI SETUP", 10, 140);
+  } else {
+    fitText(st.system.length() ? st.system : st.mode, 10, y, 400, &fonts::FreeSans12pt7b, C_SYS);
+    if (st.sysHold) { s_canvas.setFont(&fonts::Font2); s_canvas.setTextColor(C_HOLD); s_canvas.drawString("HOLD", 425, y + 4); }
+    y += 33;
+    fitText(st.department, 10, y, 400, &fonts::FreeSans12pt7b, C_DEPT);
+    if (st.deptHold) { s_canvas.setFont(&fonts::Font2); s_canvas.setTextColor(C_HOLD); s_canvas.drawString("HOLD", 425, y + 4); }
+    y += 35;
+    fitText(st.channel.length() ? st.channel : String("Scanning..."), 10, y, 400, &fonts::FreeSansBold18pt7b,
+            st.sig > 0 ? C_TEXT : C_DIM);
+    if (st.chanHold) { s_canvas.setFont(&fonts::Font2); s_canvas.setTextColor(C_HOLD); s_canvas.drawString("HOLD", 425, y + 10); }
+    y += 48;
+
+    // The scanner's TGID value already includes the word "TGID"; it's "TGID None" or
+    // "TGID: ---" when there's no talkgroup.
+    String line;
+    String tg = st.tgid; tg.trim();
+    if (tg.length() && tg.indexOf("None") < 0 && tg.indexOf("---") < 0) line += tg + "   ";
+    if (st.freq.length()) { String f = st.freq; f.trim(); line += f + "   "; }
+    if (st.mod.length()) line += st.mod;
+    auto lineW = [](int y, int h) { return (y + h > WX_TOP) ? WX_LEFT - 18 : 460; };
+    fitText(line, 10, y, lineW(y, 26), &fonts::Font4, C_TEXT);
+    y += 30;
+    if (st.service.length()) { fitText(st.service, 10, y, lineW(y, 26), &fonts::Font4, C_DIM); y += 30; }
+    String sub;
+    if (st.site.length()) sub += "Site: " + st.site + "   ";
+    String rssi = st.rssi; rssi.trim();
+    if (rssi.length() && rssi != "-999") sub += "RSSI " + rssi + "   ";
+    if (st.info1.length()) sub += st.info1;
+    if (sub.length()) { fitText(sub, 10, y, lineW(y, 16), &fonts::Font2, C_DIM); y += 20; }
+    if (st.info2.length() && y < 244) fitText(st.info2, 10, y, lineW(y, 16), &fonts::Font2, C_DIM);
   }
 
-  // System
-  fitText(st.system.length() ? st.system : st.mode, 10, y, 400, &fonts::FreeSans12pt7b, C_SYS);
-  if (st.sysHold) { s_canvas.setFont(&fonts::Font2); s_canvas.setTextColor(C_HOLD); s_canvas.drawString("HOLD", 425, y + 4); }
-  y += 33;
-  // Department
-  fitText(st.department, 10, y, 400, &fonts::FreeSans12pt7b, C_DEPT);
-  if (st.deptHold) { s_canvas.setFont(&fonts::Font2); s_canvas.setTextColor(C_HOLD); s_canvas.drawString("HOLD", 425, y + 4); }
-  y += 35;
-  // Channel (big)
-  fitText(st.channel.length() ? st.channel : String("Scanning..."), 10, y, 400, &fonts::FreeSansBold18pt7b,
-          st.sig > 0 ? C_TEXT : C_DIM);
-  if (st.chanHold) { s_canvas.setFont(&fonts::Font2); s_canvas.setTextColor(C_HOLD); s_canvas.drawString("HOLD", 425, y + 10); }
-  y += 48;
+  add(MCOL(0), MBY, MBW, MBH, "SPK -", A_SPK_DN);
+  add(MCOL(1), MBY, MBW, MBH, "SPK +", A_SPK_UP);
+  add(MCOL(2), MBY, MBW, MBH, "MUTE", A_SPK_MUTE, 0, AudioOut::muted());
+  add(MCOL(3), MBY, MBW, MBH, "KEYS", A_GOTO, PAGE_KEYS);
+  add(MCOL(2), WX_TOP, MBW, MBH, "SCAN", A_SCAN, 0, st.online && !Sds200::inWeather());
+  if (RtspAudio::lockedOut())   // scanner still holds an old audio listener
+    add(MCOL(0), WX_TOP, 2 * MBW + MBG, MBH, rebootArmed() ? "TAP AGAIN TO REBOOT" : "AUDIO STUCK: REBOOT SCANNER", A_REBOOT, 0, false, C_DARKRED);
+  add(MCOL(3), WX_TOP, MBW, MBH, "WX", A_WX, 0, st.online && Sds200::inWeather());
 
-  // Frequency / modulation line. The scanner's TGID value already includes the word "TGID",
-  // and is "TGID None" (or similar) on conventional channels - skip it then.
-  String line;
-  String tg = st.tgid; tg.trim();
-  if (tg.length() && tg.indexOf("None") < 0) line += tg + "   ";
-  if (st.freq.length()) { String f = st.freq; f.trim(); line += f + "   "; }
-  if (st.mod.length()) line += st.mod;
-  auto lineW = [](int y, int h) { return (y + h > WX_TOP) ? WX_LEFT - 18 : 460; };
-  fitText(line, 10, y, lineW(y, 26), &fonts::Font4, C_TEXT);
-  y += 30;
-
-  // Service type
-  if (st.service.length()) { fitText(st.service, 10, y, lineW(y, 26), &fonts::Font4, C_DIM); y += 30; }
-
-  // Site / signal / scanner info
-  String sub;
-  if (st.site.length()) sub += "Site: " + st.site + "   ";
-  String rssi = st.rssi; rssi.trim();
-  if (rssi.length() && rssi != "-999") sub += "RSSI " + rssi + "   ";
-  if (st.info1.length()) sub += st.info1;
-  if (sub.length()) { fitText(sub, 10, y, lineW(y, 16), &fonts::Font2, C_DIM); y += 20; }
-  if (st.info2.length() && y < 244) fitText(st.info2, 10, y, lineW(y, 16), &fonts::Font2, C_DIM);
-
-  // Scanner pop-up (e.g. "Quick Save?") as an overlay
   if (st.popup.length()) {
     s_canvas.fillRoundRect(60, 70, 360, 90, 10, C_PANEL);
     s_canvas.drawRoundRect(60, 70, 360, 90, 10, C_DEPT);
-    s_canvas.setTextDatum(textdatum_t::middle_center);
-    s_canvas.setFont(&fonts::FreeSans12pt7b);
-    s_canvas.setTextColor(C_TEXT);
-    s_canvas.drawString(st.popup.c_str(), 240, 105);
-    s_canvas.setFont(&fonts::Font2);
-    s_canvas.setTextColor(C_DIM);
-    s_canvas.drawString("KEYS page: E/YES to accept", 240, 140);
-    s_canvas.setTextDatum(textdatum_t::top_left);
+    centerText(st.popup, 240, 105, &fonts::FreeSans12pt7b, C_TEXT);
+    centerText("KEYS page: E/YES to accept", 240, 140, &fonts::Font2, C_DIM);
   }
 }
 
-static void drawKeysHeader() {
-  const auto& st = Sds200::status();
+// ---------- KEYS ----------
+static const int KW = 76, KH = 55, KG = 3, KY = 28;
+#define KX(i) (2 + (i) * (KW + KG + 1))
+#define KYR(r) (KY + (r) * (KH + KG))
+
+static void header(const String& title, const String& right = "") {
   s_canvas.fillRect(0, 0, W, 26, C_PANEL);
-  String l = st.channel.length() ? st.channel : st.mode;
-  fitText(l, 6, 5, 250, &fonts::Font2, C_TEXT);
-  if (st.popup.length()) fitText(st.popup, 262, 5, 150, &fonts::Font2, C_DEPT);
-  else {
-    char buf[32];
-    snprintf(buf, sizeof(buf), "SPK %d%%%s", AudioOut::volume(), AudioOut::muted() ? " (muted)" : "");
-    fitText(buf, 282, 5, 130, &fonts::Font2, C_DIM);
-  }
-  drawBattery(W - 56, 7);   // top right, x 424..473
+  fitText(title, 6, 5, right.length() ? 250 : 400, &fonts::Font2, C_TEXT);
+  if (right.length()) fitText(right, 262, 5, 150, &fonts::Font2, C_DIM);
+  drawBattery(W - 56, 7);
 }
 
-static void drawPowerHeader() {
-  s_canvas.setTextDatum(textdatum_t::middle_center);
-  s_canvas.setFont(&fonts::FreeSansBold18pt7b);
-  s_canvas.setTextColor(C_TEXT);
-  s_canvas.drawString("Power", W / 2, 50);
+static void pageKeys() {
+  const auto& st = Sds200::status();
+  char buf[32];
+  snprintf(buf, sizeof(buf), "SPK %d%%%s", AudioOut::volume(), AudioOut::muted() ? " (muted)" : "");
+  if (st.popup.length()) header(st.channel.length() ? st.channel : st.mode, st.popup);
+  else header(st.channel.length() ? st.channel : st.mode, buf);
+
+  static const char* pad = "123456789.0E";
+  for (int i = 0; i < 12; i++) {
+    char k = pad[i];
+    add(KX(i % 3), KYR(i / 3), KW, KH, k == 'E' ? String("E/YES") : String(k), A_KEY, k);
+  }
+  struct { const char* l; char k; } right[] = {
+    {"SYSTEM", 'A'}, {"DEPT", 'B'}, {"CHAN", 'C'}, {"<", '<'}, {"PUSH", '^'}, {">", '>'},
+    {"MENU", 'M'}, {"FUNC", 'F'}, {"AVOID", 'L'}, {"ZIP", 'Z'}, {"RANGE", 'R'}, {"REPLAY", 'Y'},
+  };
+  for (int i = 0; i < 12; i++) {
+    bool hl = (right[i].k == 'A' && st.sysHold) || (right[i].k == 'B' && st.deptHold) || (right[i].k == 'C' && st.chanHold);
+    add(KX(3 + i % 3), KYR(i / 3), KW, KH, right[i].l, A_KEY, right[i].k, hl);
+  }
+  bool rec = Settings::get().record;
+  add(KX(0), KYR(4), KW, KH, rec ? "REC ON" : "REC OFF", A_REC, 0, rec, rec ? C_DARKRED : C_BTN);
+  add(KX(1), KYR(4), KW, KH, "RECENT", A_GOTO, PAGE_RECENT);
+  add(KX(2), KYR(4), KW, KH, "FAVS", A_GOTO, PAGE_FAVS);
+  add(KX(3), KYR(4), 2 * KW + KG + 1, KH, "SETTINGS", A_GOTO, PAGE_SETTINGS);
+  add(KX(5), KYR(4), KW, KH, "BACK", A_GOTO, PAGE_MAIN);
+}
+
+// ---------- POWER ----------
+static void pagePower() {
+  centerText("Power", W / 2, 50, &fonts::FreeSansBold18pt7b, C_TEXT);
+  centerText("After POWER OFF, press BOOT to turn it back on", W / 2, 85, &fonts::Font2, C_DIM);
+  add(16, 120, 144, 120, "POWER OFF", A_POWER_OFF, 0, false, C_BAD);
+  add(168, 120, 144, 120, "RESTART", A_RESTART);
+  add(320, 120, 144, 120, "CANCEL", A_POWER_CANCEL);
+}
+
+// ---------- SETTINGS ----------
+static const uint16_t kDimAfter[] = {0, 30, 60, 120, 300, 600};
+static const uint8_t kDimLevel[] = {0, 5, 10, 20, 30, 50};
+
+static String dimAfterText(uint16_t s) {
+  if (!s) return "Never";
+  if (s < 60) return String(s) + " s";
+  return String(s / 60) + " min";
+}
+
+static void pageSettings() {
+  header("Settings");
+  const auto& c = Settings::get();
+  struct { const char* label; String value; } rows[] = {
+    {"Brightness", String(c.brightness) + "%"},
+    {"Dim after", dimAfterText(c.dimAfterS)},
+    {"Dimmed level", c.dimLevel ? String(c.dimLevel) + "%" : String("Off")},
+  };
+  for (int r = 0; r < 3; r++) {
+    int y = 32 + r * 50;
+    fitText(rows[r].label, 12, y + 12, 220, &fonts::Font4, C_TEXT);
+    add(250, y, 60, 44, "-", A_ADJ, r * 2);
+    centerText(rows[r].value, 355, y + 22, &fonts::Font4, C_DEPT);
+    add(400, y, 60, 44, "+", A_ADJ, r * 2 + 1);
+  }
+  int y = 186;
+  s_canvas.setFont(&fonts::Font2);
+  String wifi = WiFi.status() == WL_CONNECTED ? "Wi-Fi: " + WiFi.SSID() + "   IP " + WiFi.localIP().toString()
+                                              : String("Wi-Fi: not connected");
+  fitText(wifi, 12, y, 456, &fonts::Font2, C_DIM); y += 18;
+  fitText("Scanner: " + Settings::scannerIp(), 12, y, 456, &fonts::Font2, C_DIM); y += 18;
+  fitText(Calls::sdInfo() + (Calls::sdOk() ? (Settings::get().record ? "   recording on" : "   recording off") : String("")),
+          12, y, 456, &fonts::Font2, C_DIM); y += 18;
+  fitText(Ota::enabled() ? String("Wireless updates: ") + OTA_HOSTNAME + ".local" : String("Wireless updates: off (set an update password in WI-FI SETUP)"),
+          12, y, 456, &fonts::Font2, C_DIM);
+
+  add(2, 262, 116, 54, "WI-FI SETUP", A_GOTO, PAGE_SETUP);
+  add(122, 262, 138, 54, "RECONNECT AUDIO", A_AUDIO_RECONNECT);
+  add(264, 262, 134, 54, "REBOOT SCANNER", A_REBOOT);
+  add(402, 262, 76, 54, "BACK", A_GOTO, PAGE_KEYS);
+}
+
+// ---------- RECENT ----------
+static const int ROWS = 5, ROW_H = 44, ROW_Y = 30;
+
+static void pageRecent() {
+  int n = Calls::recentCount();
+  header("Recent calls (" + String(n) + ")", Calls::sdOk() ? String("tap to replay") : String("no SD card"));
+  if (s_recentTop > max(0, n - ROWS)) s_recentTop = max(0, n - ROWS);
+  if (!Calls::replaying()) s_playingRow = -1;
+  if (n == 0) centerText("No calls yet", W / 2, 140, &fonts::Font4, C_DIM);
+  for (int r = 0; r < ROWS; r++) {
+    int i = s_recentTop + r;
+    Calls::Call c;
+    if (!Calls::recent(i, c)) break;
+    int y = ROW_Y + r * (ROW_H + 2);
+    add(2, y, 476, ROW_H, "", A_RECENT_ROW, i, i == s_playingRow);
+    drawButton(s_btns.back(), false);
+    char t[16] = "";
+    if (!clockText(t, sizeof(t), c.start)) snprintf(t, sizeof(t), "--:--");
+    fitText(t, 8, y + 4, 70, &fonts::Font2, C_DIM);
+    fitText(c.channel.length() ? c.channel : c.tgid, 78, y + 4, 320, &fonts::Font2, C_TEXT);
+    fitText(c.dept.length() ? c.dept : c.system, 78, y + 24, 320, &fonts::Font0, C_DIM);
+    char d[16];
+    snprintf(d, sizeof(d), "%lus", (unsigned long)((c.durMs + 500) / 1000));
+    fitText(d, 404, y + 4, 40, &fonts::Font2, C_DIM);
+    if (c.wav.length()) {
+      if (i == s_playingRow) s_canvas.fillRect(450, y + 14, 14, 14, C_OK);
+      else s_canvas.fillTriangle(450, y + 12, 450, y + 32, 466, y + 22, C_OK);
+    }
+  }
+  add(2, 264, 116, 54, "UP", A_LIST_UP);
+  add(122, 264, 116, 54, "DOWN", A_LIST_DN);
+  add(242, 264, 116, 54, "STOP", A_STOP_PLAY, 0, Calls::replaying());
+  add(362, 264, 116, 54, "BACK", A_GOTO, PAGE_KEYS);
+}
+
+// ---------- FAVS ----------
+static void pageFavs() {
+  header("Favorites: tap = hold there, hold 1 s = save current");
+  const auto& c = Settings::get();
+  for (int i = 0; i < Settings::NUM_FAVS; i++) {
+    int x = 2 + (i % 2) * 240, y = 30 + (i / 2) * 76;
+    add(x, y, 236, 72, "", A_FAV, i);
+    drawButton(s_btns.back(), false);
+    const auto& f = c.favs[i];
+    if (f.used) {
+      fitText(strlen(f.dept) ? f.dept : f.sys, x + 10, y + 12, 216, &fonts::Font2, C_TEXT);
+      fitText(strlen(f.dept) ? f.sys : "(whole system)", x + 10, y + 40, 216, &fonts::Font2, C_DIM);
+    } else {
+      fitText(String("Slot ") + (i + 1) + " - empty", x + 10, y + 12, 216, &fonts::Font2, C_DIM);
+      fitText("hold to save current", x + 10, y + 40, 216, &fonts::Font2, C_DIM);
+    }
+  }
+  add(2, 264, 236, 54, "SCAN (release hold)", A_SCAN);
+  add(242, 264, 236, 54, "BACK", A_GOTO, PAGE_KEYS);
+}
+
+// ---------- SETUP ----------
+static void loadSetupFields() {
+  s_eSsid = Settings::wifiSsid();
+  s_ePass = Settings::wifiPassword();
+  s_eIp = Settings::scannerIp();
+  s_eOta = Settings::otaPassword();
+  s_setupMsg = "";
+}
+
+static void pageSetup() {
+  header(s_firstRun ? "Welcome! Set up Wi-Fi and the scanner" : "Wi-Fi and scanner setup");
+  struct { const char* label; String value; } rows[] = {
+    {"Wi-Fi network", s_eSsid.length() ? s_eSsid : String("(tap to choose)")},
+    {"Wi-Fi password", s_ePass.length() ? String("********") : String("(none)")},
+    {"Scanner IP", s_eIp},
+    {"Update password", s_eOta.length() ? String("********") : String("(off)")},
+  };
+  for (int r = 0; r < 4; r++) {
+    int y = 32 + r * 48;
+    fitText(rows[r].label, 10, y + 13, 150, &fonts::Font2, C_TEXT);
+    add(160, y, 318, 44, "", A_SETUP_FIELD, r);
+    drawButton(s_btns.back(), false);
+    fitText(rows[r].value, 172, y + 13, 296, &fonts::Font2, C_DEPT);
+  }
+  fitText(s_setupMsg, 10, 232, 460, &fonts::Font2, s_setupMsg.startsWith("Connected") || s_setupMsg.startsWith("Saved") ? C_OK : C_HOLD);
+  add(2, 262, 200, 54, "SAVE & CONNECT", A_SAVE_CONNECT, 0, false, 0x0320);
+  add(206, 262, 150, 54, "FORGET WI-FI", A_FORGET_WIFI);
+  add(360, 262, 118, 54, "BACK", A_GOTO, PAGE_SETTINGS);
+}
+
+static void scanWifi() {
+  showMessage("Looking for Wi-Fi networks...");
+  s_nets.clear();
+  int n = WiFi.scanNetworks();
+  for (int i = 0; i < n; i++) {
+    String ssid = WiFi.SSID(i);
+    if (!ssid.length()) continue;
+    bool dup = false;
+    for (auto& x : s_nets) if (x.ssid == ssid) { dup = true; x.rssi = max(x.rssi, (int)WiFi.RSSI(i)); }
+    if (!dup) s_nets.push_back({ssid, WiFi.RSSI(i), WiFi.encryptionType(i) == WIFI_AUTH_OPEN});
+  }
+  WiFi.scanDelete();
+  std::sort(s_nets.begin(), s_nets.end(), [](const Net& a, const Net& b) { return a.rssi > b.rssi; });
+  s_netTop = 0;
+  s_dirty = true;
+}
+
+static void pageWifi() {
+  header("Choose your Wi-Fi network (2.4 GHz)", String(s_nets.size()) + " found");
+  if (s_nets.empty()) centerText("No networks found - tap RESCAN", W / 2, 140, &fonts::Font2, C_DIM);
+  if (s_netTop > max(0, (int)s_nets.size() - ROWS)) s_netTop = max(0, (int)s_nets.size() - ROWS);
+  for (int r = 0; r < ROWS; r++) {
+    int i = s_netTop + r;
+    if (i >= (int)s_nets.size()) break;
+    int y = ROW_Y + r * (ROW_H + 2);
+    add(2, y, 476, ROW_H, "", A_WIFI_PICK, i, s_nets[i].ssid == s_eSsid);
+    drawButton(s_btns.back(), false);
+    fitText(s_nets[i].ssid, 12, y + 14, 360, &fonts::Font2, C_TEXT);
+    if (!s_nets[i].open) drawLock(410, y + 14);
+    drawWifiBars(436, y + 12, s_nets[i].rssi);
+  }
+  add(2, 264, 92, 54, "UP", A_LIST_UP);
+  add(98, 264, 92, 54, "DOWN", A_LIST_DN);
+  add(194, 264, 92, 54, "OTHER...", A_WIFI_OTHER);
+  add(290, 264, 92, 54, "RESCAN", A_WIFI_RESCAN);
+  add(386, 264, 92, 54, "BACK", A_GOTO, PAGE_SETUP);
+}
+
+// ---------- on-screen keyboard ----------
+static const char* kbRows(KbMode m, int r) {
+  static const char* lower[] = {"qwertyuiop", "asdfghjkl", "zxcvbnm"};
+  static const char* upper[] = {"QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"};
+  static const char* num[] = {"1234567890", "-/:;()$&@\"", ".,?!'#%"};
+  static const char* sym[] = {"[]{}^*+=<>", "_\\|~`", ".,?!'#%"};
+  switch (m) {
+    case KB_UPPER: return upper[r];
+    case KB_NUM: return num[r];
+    case KB_SYM: return sym[r];
+    default: return lower[r];
+  }
+}
+
+static void openKeyboard(int field) {
+  s_kbField = field;
+  s_kbText = field == 0 ? s_eSsid : field == 1 ? s_ePass : field == 2 ? s_eIp : s_eOta;
+  s_kbMode = field == 2 ? KB_IP : KB_LOWER;
+  s_kbShow = (field == 0 || field == 2);
+  s_page = PAGE_KB;
+}
+
+static void pageKb() {
+  static const char* titles[] = {"Wi-Fi network name", "Wi-Fi password", "Scanner IP address", "Update (OTA) password"};
+  bool secret = (s_kbField == 1 || s_kbField == 3) && !s_kbShow;
   s_canvas.setFont(&fonts::Font2);
   s_canvas.setTextColor(C_DIM);
-  s_canvas.drawString("After POWER OFF, press BOOT to turn it back on", W / 2, 85);
-  s_canvas.setTextDatum(textdatum_t::top_left);
+  s_canvas.drawString(titles[s_kbField], 8, 2);
+  s_canvas.fillRoundRect(4, 20, 472, 32, 6, C_PANEL);
+  String shown = secret ? String() : s_kbText;
+  if (secret) for (size_t i = 0; i < s_kbText.length(); i++) shown += '*';
+  s_canvas.setFont(&fonts::Font4);
+  while (shown.length() && s_canvas.textWidth(shown.c_str()) > 440) shown.remove(0, 1);
+  s_canvas.setTextColor(C_TEXT);
+  s_canvas.drawString(shown.c_str(), 12, 24);
+  int cx = 12 + s_canvas.textWidth(shown.c_str()) + 2;
+  s_canvas.fillRect(cx, 24, 2, 24, C_HOLD);
+
+  const int KH2 = 46, R0 = 58, RS = 52;
+  if (s_kbMode == KB_IP) {
+    static const char* ip[] = {"123", "456", "789", ".0"};
+    for (int r = 0; r < 4; r++)
+      for (int c = 0; ip[r][c]; c++) add(12 + c * 154, R0 + r * RS, 150, KH2, String(ip[r][c]), A_KB_CHAR, ip[r][c]);
+    add(12 + 2 * 154, R0 + 3 * RS, 150, KH2, "DEL", A_KB_BKSP);
+  } else {
+    for (int r = 0; r < 3; r++) {
+      const char* row = kbRows(s_kbMode, r);
+      int n = strlen(row);
+      int x0 = (r == 2) ? 74 : (W - n * 48) / 2;
+      for (int c = 0; c < n; c++) add(x0 + c * 48, R0 + r * RS, 46, KH2, String(row[c]), A_KB_CHAR, row[c]);
+    }
+    bool letters = s_kbMode == KB_LOWER || s_kbMode == KB_UPPER;
+    add(2, R0 + 2 * RS, 68, KH2, letters ? "SHIFT" : (s_kbMode == KB_NUM ? "#+=" : "123"), A_KB_SHIFT, 0, s_kbMode == KB_UPPER);
+    add(410, R0 + 2 * RS, 68, KH2, "DEL", A_KB_BKSP);
+    add(2, R0 + 3 * RS, 96, KH2, letters ? "123" : "ABC", A_KB_MODE);
+    add(102, R0 + 3 * RS, 244, KH2, "space", A_KB_CHAR, ' ');
+    if (s_kbField == 1 || s_kbField == 3) add(350, R0 + 3 * RS, 128, KH2, s_kbShow ? "HIDE" : "SHOW", A_KB_SHOW);
+  }
+  add(2, 266, 236, 50, "CANCEL", A_KB_CANCEL);
+  add(242, 266, 236, 50, "OK", A_KB_OK, 0, false, 0x0320);
 }
 
+// ---------- weather alert overlay ----------
+static void drawAlert() {
+  bool on = (millis() / 500) % 2;
+  uint16_t bg = on ? C_BAD : C_DARKRED;
+  s_canvas.fillRoundRect(10, 50, 460, 170, 12, bg);
+  s_canvas.drawRoundRect(10, 50, 460, 170, 12, C_TEXT);
+  centerText("WEATHER ALERT", W / 2, 90, &fonts::FreeSansBold18pt7b, C_TEXT);
+  const auto& st = Sds200::status();
+  String f = st.freq; f.trim();
+  String l = (st.channel.length() ? st.channel : String("NOAA Weather")) + (f.length() ? "   " + f : String(""));
+  centerText(l, W / 2, 140, &fonts::FreeSans12pt7b, C_TEXT);
+  centerText("Tap anywhere to dismiss", W / 2, 190, &fonts::Font2, C_TEXT);
+}
+
+// ---------- redraw ----------
 static void redraw() {
   s_canvas.fillScreen(C_BG);
-  const auto& st = Sds200::status();
-  size_t n;
-  const Button* b = buttons(n);
-  if (s_page == PAGE_MAIN) {
-    drawStatusBar();
-    drawMainInfo();
-  } else if (s_page == PAGE_KEYS) {
-    drawKeysHeader();
-  } else {
-    drawPowerHeader();
+  s_btns.clear();
+  switch (s_page) {
+    case PAGE_MAIN: pageMain(); break;
+    case PAGE_KEYS: pageKeys(); break;
+    case PAGE_POWER: pagePower(); break;
+    case PAGE_SETTINGS: pageSettings(); break;
+    case PAGE_RECENT: pageRecent(); break;
+    case PAGE_FAVS: pageFavs(); break;
+    case PAGE_SETUP: pageSetup(); break;
+    case PAGE_WIFI: pageWifi(); break;
+    case PAGE_KB: pageKb(); break;
   }
-  for (size_t i = 0; i < n; i++) {
-    bool hl = false;
-    if (b[i].action == A_KEY && b[i].key == 'A') hl = st.sysHold;
-    if (b[i].action == A_KEY && b[i].key == 'B') hl = st.deptHold;
-    if (b[i].action == A_KEY && b[i].key == 'C') hl = st.chanHold;
-    if (b[i].action == A_SPK_MUTE) hl = AudioOut::muted();
-    if (b[i].action == A_WX) hl = st.online && Sds200::inWeather();
-    if (b[i].action == A_SCAN) hl = st.online && !Sds200::inWeather();
-    drawButton(b[i], (int)i == s_pressed, hl);
+  for (size_t i = 0; i < s_btns.size(); i++) {
+    const Button& b = s_btns[i];
+    bool custom = b.action == A_RECENT_ROW || b.action == A_WIFI_PICK || b.action == A_FAV || b.action == A_SETUP_FIELD;
+    if (custom) {                                   // already drawn under its text; only show the press
+      if ((int)i == s_pressed) s_canvas.drawRoundRect(b.x + 1, b.y + 1, b.w - 2, b.h - 2, 7, C_TEXT);
+      continue;
+    }
+    drawButton(b, (int)i == s_pressed);
   }
+  if (alertShowing()) drawAlert();
   if (s_toast.length() && millis() < s_toastUntil) {
-    s_canvas.fillRoundRect(90, 150, 300, 40, 8, C_BTN_DOWN);
-    s_canvas.setTextDatum(textdatum_t::middle_center);
-    s_canvas.setFont(&fonts::Font4);
-    s_canvas.setTextColor(C_TEXT);
-    s_canvas.drawString(s_toast.c_str(), 240, 170);
-    s_canvas.setTextDatum(textdatum_t::top_left);
+    s_canvas.fillRoundRect(60, 150, 360, 40, 8, C_BTN_DOWN);
+    centerText(s_toast, 240, 170, &fonts::Font4, C_TEXT);
   }
   St77922::pushFrame((const uint16_t*)s_canvas.getBuffer());
+}
+
+// ---------- actions ----------
+static void adjustSetting(int which, int dir) {
+  auto& c = Settings::get();
+  if (which == 0) c.brightness = constrain(c.brightness + dir * 10, 10, 100);
+  if (which == 1) {
+    int i = 0;
+    while (i < 5 && kDimAfter[i] != c.dimAfterS) i++;
+    c.dimAfterS = kDimAfter[constrain(i + dir, 0, 5)];
+  }
+  if (which == 2) {
+    int i = 0;
+    while (i < 5 && kDimLevel[i] != c.dimLevel) i++;
+    c.dimLevel = kDimLevel[constrain(i + dir, 0, 5)];
+  }
+  Settings::changed();
+}
+
+static void saveAndConnect() {
+  IPAddress ip;
+  if (!ip.fromString(s_eIp) || ip == IPAddress(0, 0, 0, 0)) { s_setupMsg = "That scanner IP isn't valid"; return; }
+  if (s_eIp != Settings::scannerIp()) {
+    Settings::setScannerIp(s_eIp);
+    Sds200::setIp(s_eIp);
+    RtspAudio::reconnect();
+  }
+  if (!s_eSsid.length()) { s_setupMsg = "Saved scanner IP. Choose a Wi-Fi network too."; return; }
+
+  bool same = s_eSsid == Settings::wifiSsid() && s_ePass == Settings::wifiPassword() && WiFi.status() == WL_CONNECTED;
+  if (!same) {
+    String oldSsid = Settings::wifiSsid(), oldPass = Settings::wifiPassword();
+    showMessage("Connecting to Wi-Fi", s_eSsid.c_str());
+    WiFi.disconnect();
+    delay(200);
+    WiFi.begin(s_eSsid.c_str(), s_ePass.c_str());
+    uint32_t start = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) delay(100);
+    if (WiFi.status() != WL_CONNECTED) {
+      s_setupMsg = "Couldn't join \"" + s_eSsid + "\" - check the password (nothing saved)";
+      WiFi.disconnect();
+      if (oldSsid.length()) WiFi.begin(oldSsid.c_str(), oldPass.c_str());
+      return;
+    }
+    Settings::setWifi(s_eSsid, s_ePass);
+  }
+  if (s_eOta != Settings::otaPassword()) { Settings::setOtaPassword(s_eOta); Ota::restart(); }
+  s_setupMsg = (same ? String("Saved") : String("Connected")) + " - board IP " + WiFi.localIP().toString();
+  s_firstRun = false;
+}
+
+static void goPage(Page p) {
+  if (p == PAGE_SETUP && s_page != PAGE_SETUP && s_page != PAGE_WIFI && s_page != PAGE_KB) loadSetupFields();
+  if (p == PAGE_RECENT && s_page != PAGE_RECENT) s_recentTop = 0;
+  if (s_page == PAGE_RECENT && p != PAGE_RECENT && Calls::replaying()) Calls::stopPlay();
+  s_page = p;
+}
+
+static void doAction(const Button& b, bool longPress) {
+  const auto& st = Sds200::status();
+  switch (b.action) {
+    case A_KEY: Sds200::key((char)b.arg, longPress ? 'L' : 'P'); break;
+    case A_SPK_DN:
+    case A_SPK_UP:
+      AudioOut::setVolume(AudioOut::volume() + (b.action == A_SPK_UP ? 10 : -10));
+      Settings::get().spkVolume = AudioOut::volume();
+      Settings::changed();
+      toast(String("Speaker ") + AudioOut::volume() + "%");
+      break;
+    case A_SPK_MUTE:
+      AudioOut::setMuted(!AudioOut::muted());
+      Settings::get().muted = AudioOut::muted();
+      Settings::changed();
+      break;
+    case A_GOTO: goPage((Page)b.arg); break;
+    case A_POWER_CANCEL: s_page = s_pageBeforePower; break;
+    case A_POWER_OFF:
+      showLogo("Powering off - press BOOT to turn on");
+      Calls::closeAll();
+      Settings::saveNow();
+      delay(600);
+      Power::off();
+      break;
+    case A_RESTART:
+      showLogo("Restarting...");
+      Calls::closeAll();
+      Settings::saveNow();
+      Power::restart();
+      break;
+    case A_WX: Sds200::weather(true); toast("Weather"); break;
+    case A_SCAN: Sds200::weather(false); toast("Scanning"); if (s_page == PAGE_FAVS) s_page = PAGE_MAIN; break;
+    case A_AUDIO_RECONNECT: RtspAudio::reconnect(); toast("Reconnecting audio"); break;
+    case A_REBOOT:
+      if (rebootArmed()) {
+        s_rebootArmedUntil = 0;
+        Sds200::rebootScanner();
+        RtspAudio::reconnect();
+        toast("Rebooting scanner");
+      } else {
+        s_rebootArmedUntil = millis() + REBOOT_CONFIRM_MS;
+      }
+      break;
+    case A_REC: {
+      auto& c = Settings::get();
+      c.record = !c.record;
+      Settings::changed();
+      toast(!Calls::sdOk() ? String("No SD card") : c.record ? String("Recording on") : String("Recording off"));
+      break;
+    }
+    case A_RECENT_ROW:
+      if (s_playingRow == b.arg && Calls::replaying()) { Calls::stopPlay(); s_playingRow = -1; }
+      else if (Calls::play(b.arg)) s_playingRow = b.arg;
+      else toast(Calls::sdOk() ? "Not recorded" : "No SD card");
+      break;
+    case A_STOP_PLAY: Calls::stopPlay(); s_playingRow = -1; break;
+    case A_LIST_UP:
+      if (s_page == PAGE_RECENT) s_recentTop = max(0, s_recentTop - ROWS);
+      else s_netTop = max(0, s_netTop - ROWS);
+      break;
+    case A_LIST_DN:
+      if (s_page == PAGE_RECENT) s_recentTop += ROWS;
+      else s_netTop += ROWS;
+      break;
+    case A_FAV: {
+      auto& f = Settings::get().favs[b.arg];
+      if (longPress) {
+        if (!st.online || Sds200::inWeather() || st.sysIndex == 0xFFFFFFFF || !st.system.length()) { toast("Nothing to save"); break; }
+        f.used = true;
+        f.sysIndex = st.sysIndex;
+        bool dept = st.deptIndex != 0xFFFFFFFF && st.department.length();
+        f.deptIndex = dept ? st.deptIndex : 0xFFFFFFFF;
+        strlcpy(f.sys, st.system.c_str(), sizeof(f.sys));
+        strlcpy(f.dept, dept ? st.department.c_str() : "", sizeof(f.dept));
+        Settings::changed();
+        toast("Saved to slot " + String(b.arg + 1));
+      } else if (f.used) {
+        Sds200::holdOn(f.sysIndex, f.deptIndex);
+        toast(String("Holding: ") + (strlen(f.dept) ? f.dept : f.sys));
+        s_page = PAGE_MAIN;
+      } else {
+        toast("Hold for 1 s to save here");
+      }
+      break;
+    }
+    case A_ADJ: adjustSetting(b.arg / 2, (b.arg % 2) ? 1 : -1); break;
+    case A_SETUP_FIELD:
+      if (b.arg == 0) { scanWifi(); s_page = PAGE_WIFI; }
+      else openKeyboard(b.arg);
+      break;
+    case A_WIFI_PICK: {
+      const Net& n = s_nets[b.arg];
+      if (n.ssid != s_eSsid) s_ePass = "";
+      s_eSsid = n.ssid;
+      if (n.open) { s_ePass = ""; s_page = PAGE_SETUP; }
+      else openKeyboard(1);
+      break;
+    }
+    case A_WIFI_OTHER: openKeyboard(0); break;
+    case A_WIFI_RESCAN: scanWifi(); break;
+    case A_SAVE_CONNECT: saveAndConnect(); break;
+    case A_FORGET_WIFI:
+      Settings::forgetWifi();
+      s_eSsid = ""; s_ePass = "";
+      WiFi.disconnect();
+      s_setupMsg = "Wi-Fi forgotten";
+      break;
+    case A_KB_CHAR:
+      if (s_kbText.length() < 63) s_kbText += (char)b.arg;
+      if (s_kbMode == KB_UPPER) s_kbMode = KB_LOWER;     // shift is one-shot
+      break;
+    case A_KB_BKSP: if (s_kbText.length()) s_kbText.remove(s_kbText.length() - 1); break;
+    case A_KB_SHIFT:
+      s_kbMode = s_kbMode == KB_LOWER ? KB_UPPER : s_kbMode == KB_UPPER ? KB_LOWER : s_kbMode == KB_NUM ? KB_SYM : KB_NUM;
+      break;
+    case A_KB_MODE: s_kbMode = (s_kbMode == KB_LOWER || s_kbMode == KB_UPPER) ? KB_NUM : KB_LOWER; break;
+    case A_KB_SHOW: s_kbShow = !s_kbShow; break;
+    case A_KB_CANCEL: s_page = PAGE_SETUP; break;
+    case A_KB_OK:
+      if (s_kbField == 0) { s_eSsid = s_kbText; s_ePass = ""; openKeyboard(1); break; }
+      if (s_kbField == 1) s_ePass = s_kbText;
+      if (s_kbField == 2) { s_eIp = s_kbText; s_eIp.trim(); }
+      if (s_kbField == 3) s_eOta = s_kbText;
+      s_page = PAGE_SETUP;
+      break;
+    default: break;
+  }
+  s_dirty = true;
 }
 
 // ---------- touch ----------
 // Convert a physical (portrait) touch point to logical landscape coordinates.
 static bool physToLogical(int px, int py, int& lx, int& ly) {
-  // Solve phys = o + lx*dx + ly*dy for (lx, ly). dx/dy are unit axis vectors.
   int rx = px - s_ox, ry = py - s_oy;
   int det = s_dxx * s_dyy - s_dyx * s_dxy;
   if (det == 0) return false;
@@ -354,47 +837,11 @@ static bool physToLogical(int px, int py, int& lx, int& ly) {
 }
 
 static int hitTest(int x, int y) {
-  size_t n;
-  const Button* b = buttons(n);
-  for (size_t i = 0; i < n; i++)
-    if (x >= b[i].x && x < b[i].x + b[i].w && y >= b[i].y && y < b[i].y + b[i].h) return i;
-  return -1;
-}
-
-static void doAction(const Button& b, bool longPress) {
-  switch (b.action) {
-    case A_KEY: Sds200::key(b.key, longPress ? 'L' : 'P'); break;
-    case A_SPK_DN: AudioOut::setVolume(AudioOut::volume() - 10); toast(String("Speaker ") + AudioOut::volume() + "%"); break;
-    case A_SPK_UP: AudioOut::setVolume(AudioOut::volume() + 10); toast(String("Speaker ") + AudioOut::volume() + "%"); break;
-    case A_SPK_MUTE: AudioOut::setMuted(!AudioOut::muted()); break;
-    case A_PAGE_KEYS: s_page = PAGE_KEYS; break;
-    case A_PAGE_MAIN: s_page = PAGE_MAIN; break;
-    case A_POWER_CANCEL: s_page = s_pageBeforePower; break;
-    case A_POWER_OFF:
-      showLogo("Powering off - press BOOT to turn on");
-      delay(800);
-      Power::off();
-      break;
-    case A_RESTART:
-      showLogo("Restarting...");
-      Power::restart();
-      break;
-    case A_WX:   Sds200::weather(true);  toast("Weather"); break;
-    case A_SCAN: Sds200::weather(false); toast("Scanning"); break;
-    case A_AUDIO_RECONNECT: RtspAudio::reconnect(); toast("Reconnecting audio"); break;
-    case A_REBOOT:
-      if (rebootArmed()) {
-        s_rebootArmedUntil = 0;
-        Sds200::rebootScanner();
-        RtspAudio::reconnect();   // audio reconnects by itself once the scanner is back
-        toast("Rebooting scanner");
-      } else {
-        s_rebootArmedUntil = millis() + REBOOT_CONFIRM_MS;
-      }
-      break;
-    default: break;
+  for (size_t i = 0; i < s_btns.size(); i++) {
+    const Button& b = s_btns[i];
+    if (x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h) return i;
   }
-  s_dirty = true;
+  return -1;
 }
 
 static void handleTouch() {
@@ -408,25 +855,41 @@ static void handleTouch() {
 #endif
   }
 
+  // A touch on a dimmed screen (or on the weather alert) is used up by waking / dismissing.
+  if (down && !s_swallowTouch && s_pressed < 0) {
+    bool wasDim = s_dimmed;
+    activity();
+    if (wasDim) { s_dimmed = false; s_swallowTouch = true; s_dirty = true; }
+    else if (alertShowing()) {
+      Calls::ackAlert();
+      if (gsiAlert()) s_gsiAlertAck = true;
+      s_swallowTouch = true;
+      s_dirty = true;
+    }
+  }
+  if (s_swallowTouch) { if (!down) s_swallowTouch = false; return; }
+  if (down) activity();
+
   if (down && s_pressed < 0) {
     int hit = hitTest(lx, ly);
     if (hit >= 0) { s_pressed = hit; s_pressStart = millis(); s_longSent = false; s_dirty = true; }
   } else if (down && s_pressed >= 0) {
-    size_t n;
-    const Button* b = buttons(n);
-    // Long press (only meaningful for scanner keys)
-    if (!s_longSent && b[s_pressed].action == A_KEY && millis() - s_pressStart > 700) {
-      doAction(b[s_pressed], true);
+    if (s_pressed >= (int)s_btns.size()) { s_pressed = -1; return; }
+    const Button b = s_btns[s_pressed];
+    if (!s_longSent && (b.action == A_KEY || b.action == A_FAV) && millis() - s_pressStart > (b.action == A_FAV ? 1000u : 700u)) {
       s_longSent = true;
-      toast("Long press");
+      s_pressed = -1;
+      doAction(b, true);
+      if (b.action == A_KEY) toast("Long press");
     }
   } else if (!down && s_pressed >= 0) {
-    size_t n;
-    const Button* b = buttons(n);
-    int idx = s_pressed;
+    if (s_pressed >= (int)s_btns.size()) { s_pressed = -1; return; }
+    const Button b = s_btns[s_pressed];
     s_pressed = -1;
-    if (!s_longSent) doAction(b[idx], false);
+    if (!s_longSent) doAction(b, false);
     s_dirty = true;
+  } else if (!down) {
+    s_longSent = false;
   }
 }
 
@@ -461,7 +924,15 @@ bool begin() {
   if (!s_canvas.createSprite(LCD_NATIVE_W, LCD_NATIVE_H)) return false;
   s_canvas.setRotation(SCREEN_ROTATION);
   measureRotation();
+  s_lastActivity = millis();
   return true;
+}
+
+void openSetup(bool firstRun) {
+  s_firstRun = firstRun;
+  loadSetupFields();
+  s_page = PAGE_SETUP;
+  s_dirty = true;
 }
 
 static void drawBootStatus(const char* status) {
@@ -528,20 +999,56 @@ void loop() {
     s_pageBeforePower = s_page;
     s_page = PAGE_POWER;
     s_pressed = -1;
+    s_dimmed = false;
+    activity();
     s_dirty = true;
   }
   if (Power::bootPressed() && s_page == PAGE_POWER) { s_page = s_pageBeforePower; s_dirty = true; }
 
-  // Scanner said no to a mode change (e.g. JPM,NG)
   String err = Sds200::takeError();
   if (err.length()) toast(err);
 
-  uint32_t v = Sds200::status().version;
-  if (v != s_lastVersion) { s_lastVersion = v; s_dirty = true; }
+  // Scanner status changed: tell the call logger, count channel changes / signal as activity.
+  const auto& st = Sds200::status();
+  if (st.version != s_lastVersion) {
+    static String lastChan;
+    s_lastVersion = st.version;
+    s_dirty = true;
+    Calls::setContext(st.online, st.system, st.department, st.channel, st.tgid, st.freq);
+    if (st.channel != lastChan && st.sig > 0) activity();
+    lastChan = st.channel;
+    if (!gsiAlert()) s_gsiAlertAck = false;
+  }
+  if (st.sig > 0 || Calls::inCall() || Calls::replaying()) activity();
+
+  // Weather alert: wake, unmute, beep now and then while nothing else is playing.
+  static bool alertWas = false;
+  bool alert = alertShowing();
+  if (alert) {
+    activity();
+    if (!alertWas) {
+      if (AudioOut::muted()) AudioOut::setMuted(false);
+      s_lastBeep = 0;
+    }
+    if (millis() - s_lastBeep > 4000 && !AudioOut::playing()) { s_lastBeep = millis(); AudioOut::beep(); }
+    static uint32_t lastFlash = 0;
+    if (millis() - lastFlash > 500) { lastFlash = millis(); s_dirty = true; }
+  }
+  if (alert != alertWas) s_dirty = true;
+  alertWas = alert;
+
+  // Dim when idle.
+  uint16_t dimAfter = Settings::get().dimAfterS;
+  bool shouldDim = dimAfter && millis() - s_lastActivity > dimAfter * 1000UL && s_page != PAGE_KB && s_page != PAGE_SETUP;
+  if (shouldDim != s_dimmed) { s_dimmed = shouldDim; }
+  applyBrightness();
+
+  static uint32_t recentVer = 0;
+  if (s_page == PAGE_RECENT && Calls::recentVersion() != recentVer) { recentVer = Calls::recentVersion(); s_dirty = true; }
   if (s_toast.length() && millis() >= s_toastUntil) { s_toast = ""; s_dirty = true; }
   if (s_rebootArmedUntil && millis() >= s_rebootArmedUntil) { s_rebootArmedUntil = 0; s_dirty = true; }
 
-  // Refresh at least once a second (audio indicator), and quickly on changes.
+  // Refresh at least once a second (clock, audio indicator), and quickly on changes.
   uint32_t now = millis();
   if ((s_dirty && now - s_lastDraw > 40) || now - s_lastDraw > 1000) {
     s_dirty = false;

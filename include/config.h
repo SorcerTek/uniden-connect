@@ -19,7 +19,31 @@
 #define AUDIO_PREBUFFER_MS  250              // buffering before playback starts (raise if choppy)
 #define SPEAKER_VOLUME_DEFAULT 70            // 0-100, board speaker volume (separate from scanner VOL)
 
+// ---- Clock -----------------------------------------------------
+// POSIX time zone (US Central with daylight saving). Eastern: "EST5EDT,M3.2.0,M11.1.0"
+#define TIMEZONE            "CST6CDT,M3.2.0,M11.1.0"
+#define NTP_SERVER_1        "pool.ntp.org"
+#define NTP_SERVER_2        "time.nist.gov"
+
+// ---- Recording / call log (microSD) ----------------------------
+// A call is recorded only while real audio comes through: the audio level must be
+// above REC_SILENCE_RMS (16-bit sample RMS over 50 ms). Raise it if hiss gets
+// recorded, lower it if quiet calls are missed.
+#define REC_SILENCE_RMS     300
+#define REC_HANG_MS         2000             // a call ends after this much silence
+#define REC_MIN_MS          1000             // shorter calls are thrown away
+#define RECENT_MAX          20               // calls kept in the RECENT list
+
+// ---- Weather alert ----------------------------------------------
+// NOAA Weather Radio warning tone (1050 Hz) heard for at least this long = alert.
+#define WX_ALERT_TONE_MS    1000
+
+// ---- Wireless updates -------------------------------------------
+#define OTA_HOSTNAME        "uniden-connect"   // upload to uniden-connect.local
+
 // ---- Screen ----------------------------------------------------
+#define DIM_AFTER_S_DEFAULT 60               // dim after this many idle seconds (changeable in SETTINGS)
+#define DIM_LEVEL_DEFAULT   10               // dimmed brightness % (0 = off)
 // Boot animation plays while connecting: at least this long (one pass of the
 // animation), and no longer than the timeout even if the scanner isn't answering.
 #define BOOT_ANIM_MIN_MS      3000
@@ -66,6 +90,14 @@
 #define PIN_I2S_WS    21
 #define PIN_I2S_DOUT  15
 #define PIN_AMP_EN    1    // speaker amplifier enable, active LOW
+
+// microSD card (SDMMC, 4-bit)
+#define PIN_SD_CLK    5
+#define PIN_SD_CMD    4
+#define PIN_SD_D0     6
+#define PIN_SD_D1     7
+#define PIN_SD_D2     2
+#define PIN_SD_D3     3
 
 // BOOT button: hold it this long to open the power menu (POWER OFF / RESTART)
 #define PIN_BOOT_BTN  0

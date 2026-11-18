@@ -7,7 +7,9 @@
 // The SDP the scanner sends is printed on the Serial Monitor for troubleshooting.
 #include "rtsp_audio.h"
 #include "audio_out.h"
+#include "calls.h"
 #include "config.h"
+#include "settings.h"
 #include <WiFi.h>
 #include <WiFiUdp.h>
 
@@ -25,11 +27,13 @@ static void setStatus(const char* s) {
 }
 
 static volatile bool s_reconnect = false;
+static volatile uint32_t s_busySince = 0;
 static volatile bool s_shutdown = false;
 static volatile bool s_stopped = false;
 
 bool connected() { return s_connected; }
-void reconnect() { s_reconnect = true; }
+void reconnect() { s_reconnect = true; s_busySince = 0; }
+bool lockedOut() { return s_busySince && millis() - s_busySince > 30000; }
 void shutdown(uint32_t waitMs) {
   s_shutdown = true;
   s_reconnect = true;
@@ -187,12 +191,25 @@ static bool startSession(Session& s) {
   s.session = "";
   s.setupDone = false;
   // Leave the port out of the URL when it is the default (the form ProScan / VLC use).
-  if (SCANNER_RTSP_PORT == 554) s.base = String("rtsp://") + SCANNER_IP + SCANNER_RTSP_PATH;
-  else s.base = String("rtsp://") + SCANNER_IP + ":" + SCANNER_RTSP_PORT + SCANNER_RTSP_PATH;
+  String ip = Settings::scannerIp();
+  if (SCANNER_RTSP_PORT == 554) s.base = String("rtsp://") + ip + SCANNER_RTSP_PATH;
+  else s.base = String("rtsp://") + ip + ":" + SCANNER_RTSP_PORT + SCANNER_RTSP_PATH;
   s.aggregate = s.base;
 
   setStatus("connecting");
-  if (!s.tcp.connect(SCANNER_IP, SCANNER_RTSP_PORT, 3000)) { setStatus("no RTSP server"); return false; }
+  if (!s.tcp.connect(ip.c_str(), SCANNER_RTSP_PORT, 3000)) {
+    // "Connection reset" = the scanner is still holding an old listener (e.g. the board
+    // was reset or unplugged mid-stream). It only lets go when the scanner restarts.
+    if (errno == ECONNRESET) {
+      if (!s_busySince) s_busySince = millis();
+      setStatus("scanner busy");
+    } else {
+      s_busySince = 0;
+      setStatus("no RTSP server");
+    }
+    return false;
+  }
+  s_busySince = 0;
   s.tcp.setTimeout(3);
 
   String hdr, body;
@@ -310,7 +327,8 @@ static void rtspTask(void*) {
             if (s.codec == C_PCMU) for (int i = 0; i < plen; i++) pcm[n++] = ulaw2lin(p[i]);
             else if (s.codec == C_PCMA) for (int i = 0; i < plen; i++) pcm[n++] = alaw2lin(p[i]);
             else if (s.codec == C_L16) for (int i = 0; i + 1 < plen; i += 2) pcm[n++] = (int16_t)((p[i] << 8) | p[i + 1]);
-            AudioOut::push(pcm, n);
+            Calls::feed(pcm, n, s.rate);                 // recorder / weather-alert detector
+            if (!Calls::replaying()) AudioOut::push(pcm, n);
           }
           lastRtp = millis();
         }

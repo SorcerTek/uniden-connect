@@ -26,10 +26,13 @@ struct Status {
   bool scannerMuted = false;
   String info1, info2;          // ViewDescription InfoArea1/2
   String popup;                 // PopupScreen text
+  String wxMode;                // WxMode Mode (e.g. "Monitor Weather"), empty outside weather mode
+  uint32_t sysIndex = 0xFFFFFFFF, deptIndex = 0xFFFFFFFF;   // for favorites
   uint32_t version = 0;         // increments whenever anything changes
 };
 
 void begin();
+void setIp(const String& ip);   // scanner address changed on the SETUP screen
 void loop();                    // call often from loop()
 const Status& status();
 
@@ -38,6 +41,8 @@ void key(char code, char mode = 'P');   // KEY,<code>,<mode>  (P = press, L = lo
 String takeError();             // last error reply to a mode command, then clears it ("" if none)
 bool inWeather();               // scanner is in WX (NOAA weather) mode
 void weather(bool on);          // on: JPM,WX_MODE,NORMAL (scans the NOAA channels); off: back to scan mode
+                                //   (off also releases any System / Department / Channel hold)
+void holdOn(uint32_t sysIndex, uint32_t deptIndex);   // favorite: hold on a department (or a whole system)
 void rebootScanner();           // MSM,<n>: brief USB mass-storage mode, then the scanner restarts
 
 }  // namespace Sds200

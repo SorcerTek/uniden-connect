@@ -206,5 +206,20 @@ void setMuted(bool m) {
 }
 bool muted() { return s_muted; }
 bool playing() { return millis() - s_lastAudioMs.load() < 1500; }
+uint32_t queued() { return s_head.load() - s_tail.load(); }
+uint32_t streamRate() { return s_streamRate.load(); }
+
+void beep(int hz, int ms) {
+  uint32_t rate = s_streamRate.load();
+  static int16_t buf[256];
+  uint32_t total = rate * ms / 1000, done = 0;
+  float ph = 0, step = 2.0f * PI * hz / rate;
+  while (done < total) {
+    size_t n = min<uint32_t>(256, total - done);
+    for (size_t i = 0; i < n; i++) { buf[i] = (int16_t)(12000 * sinf(ph)); ph += step; }
+    push(buf, n);
+    done += n;
+  }
+}
 
 }  // namespace AudioOut

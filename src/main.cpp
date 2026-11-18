@@ -2,15 +2,18 @@
 // Network remote for a Uniden SDS200 scanner on the Freenove ESP32-S3 3.5" display (FNK0104N).
 //
 //   - shows what the scanner is receiving (system / department / channel / frequency)
-//   - touch buttons send scanner key presses, volume and squelch
+//   - touch buttons send scanner key presses
 //   - plays the scanner's audio stream on the board's speaker
+//   - call log, recordings and recent calls on the microSD card
 //
-// Settings: include/config.h    Wi-Fi: include/secrets.h
+// Settings: include/config.h.  Wi-Fi, scanner IP and the update password are set on
+// the board (KEYS > SETTINGS > WI-FI SETUP); include/secrets.h is optional.
 #include <Arduino.h>
 #include <WiFi.h>
 #include <Wire.h>
+#include <time.h>
 #include "config.h"
-#include "secrets.h"
+#include "settings.h"
 #include "display_st77922.h"
 #include "touch_st77922.h"
 #include "audio_out.h"
@@ -19,6 +22,8 @@
 #include "ui.h"
 #include "battery.h"
 #include "power.h"
+#include "calls.h"
+#include "ota.h"
 
 void setup() {
   Power::begin();                    // release pins held during power-off sleep
@@ -27,21 +32,36 @@ void setup() {
   Serial.println("\nUniden Connect starting");
 
   if (!psramFound()) Serial.println("WARNING: PSRAM not found - check platformio.ini memory settings");
+  Settings::begin();
 
   if (!St77922::begin()) Serial.println("Display init failed");
+  St77922::setBrightness(Settings::get().brightness);
   if (!Ui::begin()) Serial.println("UI init failed (not enough memory?)");
   Ui::showLogo("Starting...");
 
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);
   if (!Touch::begin()) Serial.println("Touch controller not found");
   if (!AudioOut::begin()) Serial.println("Audio init failed");
+  AudioOut::setVolume(Settings::get().spkVolume);
+  AudioOut::setMuted(Settings::get().muted);
   Battery::begin();
+  Calls::begin();
 
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);              // keeps audio latency low
   WiFi.setAutoReconnect(true);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  WiFi.setHostname(OTA_HOSTNAME);
+  configTzTime(TIMEZONE, NTP_SERVER_1, NTP_SERVER_2);   // clock syncs once Wi-Fi is up
   RtspAudio::begin();                // its task waits for Wi-Fi by itself
+
+  if (!Settings::hasWifi()) {
+    // Nothing saved yet: go straight to the setup screen.
+    Serial.println("No Wi-Fi saved - opening setup");
+    Sds200::begin();
+    Ui::openSetup(true);
+    return;
+  }
+  WiFi.begin(Settings::wifiSsid().c_str(), Settings::wifiPassword().c_str());
 
   // Boot animation: loops while Wi-Fi connects and until the scanner answers
   // (at least one full pass, at most BOOT_ANIM_TIMEOUT_MS), then the normal screen.
@@ -61,11 +81,11 @@ void setup() {
     uint32_t t = millis() - start;
     if (online && t >= BOOT_ANIM_MIN_MS) break;
     if (t >= BOOT_ANIM_TIMEOUT_MS) {
-      Serial.println(wifi ? "Scanner not answering yet - starting anyway" : "Wi-Fi not connected yet - check include/secrets.h");
+      Serial.println(wifi ? "Scanner not answering yet - starting anyway" : "Wi-Fi not connected yet");
       break;
     }
-    if (!wifi) line = String("Connecting to Wi-Fi: ") + WIFI_SSID;
-    else if (!online) line = String("Wi-Fi OK - looking for scanner at ") + SCANNER_IP;
+    if (!wifi) line = "Connecting to Wi-Fi: " + Settings::wifiSsid();
+    else if (!online) line = "Wi-Fi OK - looking for scanner at " + Settings::scannerIp();
     else line = "Scanner connected";
     Ui::bootAnimFrame(line.c_str());
   }
@@ -75,6 +95,8 @@ void setup() {
 void loop() {
   Sds200::loop();
   Battery::loop();
+  Settings::loop();
+  Ota::loop();
   Ui::loop();
   delay(2);
 }

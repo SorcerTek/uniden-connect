@@ -69,6 +69,7 @@ void restart() {
 void off() {
   quiet();
   St77922::sleep();
+  St77922::releaseBacklightPin();
   // Keep the amplifier off and the backlight dark while asleep.
   digitalWrite(PIN_AMP_EN, HIGH);
   digitalWrite(PIN_LCD_BL, LOW);

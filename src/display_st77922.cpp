@@ -118,9 +118,16 @@ static void initPanel() {
   delay(20);
 }
 
+static const int BL_CH = 7;          // LEDC channel for the backlight
+static bool s_pwm = false;
+
 bool begin() {
   pinMode(PIN_LCD_BL, OUTPUT);
   digitalWrite(PIN_LCD_BL, LOW);
+  ledcSetup(BL_CH, 5000, 8);
+  ledcAttachPin(PIN_LCD_BL, BL_CH);
+  ledcWrite(BL_CH, 0);
+  s_pwm = true;
 
   spi_bus_config_t bus = {};
   bus.data0_io_num = PIN_LCD_D0;
@@ -162,7 +169,19 @@ bool begin() {
   return true;
 }
 
-void setBacklight(bool on) { digitalWrite(PIN_LCD_BL, on ? HIGH : LOW); }
+void setBrightness(int pct) {
+  pct = constrain(pct, 0, 100);
+  if (s_pwm) ledcWrite(BL_CH, pct * 255 / 100);
+  else digitalWrite(PIN_LCD_BL, pct > 0 ? HIGH : LOW);
+}
+
+void setBacklight(bool on) { setBrightness(on ? 100 : 0); }
+
+void releaseBacklightPin() {
+  if (s_pwm) { ledcDetachPin(PIN_LCD_BL); s_pwm = false; }
+  pinMode(PIN_LCD_BL, OUTPUT);
+  digitalWrite(PIN_LCD_BL, LOW);
+}
 
 void sleep() {
   setBacklight(false);

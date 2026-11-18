@@ -10,6 +10,8 @@ namespace St77922 {
 
 bool begin();                       // init SPI bus + panel, turn backlight on
 void setBacklight(bool on);
+void setBrightness(int pct);        // 0-100 (PWM on the backlight pin)
+void releaseBacklightPin();         // back to a plain GPIO (before deep sleep)
 void sleep();                       // panel off + sleep-in (before deep sleep)
 
 // Send a full native-orientation (320x480) RGB565 frame.

@@ -15,5 +15,8 @@ int  volume();
 void setMuted(bool m);
 bool muted();
 bool playing();                                 // true while audio is flowing
+uint32_t queued();                              // samples waiting in the buffer
+uint32_t streamRate();
+void beep(int hz = 880, int ms = 250);          // short tone (only when nothing else is playing)
 
 }  // namespace AudioOut

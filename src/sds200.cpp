@@ -6,6 +6,7 @@
 //    the last one has <Footer ... EOT="1"/> (or ends with </ScannerInfo>).
 #include "sds200.h"
 #include "config.h"
+#include "settings.h"
 #include <WiFi.h>
 #include <WiFiUdp.h>
 
@@ -40,9 +41,35 @@ String takeError() { String e = s_error; s_error = ""; return e; }
 
 bool inWeather() { return s_st.mode.indexOf("WX") >= 0; }
 
+// After SCAN: release holds one at a time (each hold key toggles), checked against GSI.
+static uint8_t s_releaseTries = 0;
+static uint32_t s_releaseAt = 0;          // don't toggle again until GSI has caught up
+
 void weather(bool on) {
   sendRaw(on ? "JPM,WX_MODE,NORMAL" : "JPM,SCN_MODE,0");
-  log_w("weather %s", on ? "on" : "off");
+  s_releaseTries = on ? 0 : 6;
+  s_releaseAt = millis();
+  s_lastPoll = 0;
+}
+
+void holdOn(uint32_t sysIndex, uint32_t deptIndex) {
+  char buf[48];
+  if (deptIndex != 0xFFFFFFFF) snprintf(buf, sizeof(buf), "HLD,DEPT,%lu,0", (unsigned long)deptIndex);
+  else snprintf(buf, sizeof(buf), "HLD,SYS,%lu,0", (unsigned long)sysIndex);
+  s_releaseTries = 0;
+  sendRaw(buf);
+  s_lastPoll = 0;
+}
+
+static void releaseHolds() {
+  if (!s_releaseTries || millis() - s_releaseAt < 1500) return;
+  s_releaseAt = millis();
+  s_releaseTries--;
+  if (inWeather()) return;                     // wait until we're back in scan mode
+  if (s_st.chanHold) key('C');
+  else if (s_st.deptHold) key('B');
+  else if (s_st.sysHold) key('A');
+  else s_releaseTries = 0;                     // all free
 }
 
 // Same trick ProScan uses: ask for mass-storage mode for a few seconds; when it
@@ -108,10 +135,13 @@ static void parseGsi(const String& xml) {
   String sys = element(xml, "System");
   set(s_st.system, attr(sys, "Name"), ch);
   set(s_st.sysHold, attr(sys, "Hold") == "On", ch);
+  { String i = attr(sys, "Index"); s_st.sysIndex = i.length() ? (uint32_t)strtoul(i.c_str(), nullptr, 10) : 0xFFFFFFFF; }
 
   String dept = element(xml, "Department");
   set(s_st.department, attr(dept, "Name"), ch);
   set(s_st.deptHold, attr(dept, "Hold") == "On", ch);
+  { String i = attr(dept, "Index"); s_st.deptIndex = i.length() ? (uint32_t)strtoul(i.c_str(), nullptr, 10) : 0xFFFFFFFF; }
+  set(s_st.wxMode, attr(element(xml, "WxMode"), "Mode"), ch);
 
   set(s_st.site, attr(element(xml, "Site"), "Name"), ch);
 
@@ -148,6 +178,7 @@ static void parseGsi(const String& xml) {
   set(s_st.popup, attr(element(xml, "PopupScreen"), "Text"), ch);
 
   if (ch) s_st.version++;
+  releaseHolds();
 }
 
 static void handlePacket(const char* data, int len) {
@@ -170,6 +201,11 @@ static void handlePacket(const char* data, int len) {
     }
     return;
   }
+  if (pkt.startsWith("HLD,")) {
+    pkt.trim();
+    if (pkt != "HLD,OK") s_error = "Scanner: " + pkt;
+    return;
+  }
   if (pkt.startsWith("JPM,")) {
     pkt.trim();
     if (pkt != "JPM,OK") s_error = "Scanner: " + pkt;
@@ -186,8 +222,10 @@ static void handlePacket(const char* data, int len) {
   log_d("scanner: %s", pkt.c_str());
 }
 
+void setIp(const String& ip) { s_ip.fromString(ip); s_st.online = false; s_st.version++; }
+
 void begin() {
-  s_ip.fromString(SCANNER_IP);
+  s_ip.fromString(Settings::scannerIp());
   s_udp.begin(0);   // any local port
   s_started = true;
   sendRaw("MDL");
