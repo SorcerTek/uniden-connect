@@ -960,6 +960,7 @@ static void doAction(const Button& b, bool longPress) {
       AudioOut::setVolume(AudioOut::volume() + (b.action == A_SPK_UP ? 10 : -10));
       Settings::get().spkVolume = AudioOut::volume();
       Settings::changed();
+      if (!AudioOut::muted()) AudioOut::beep(880, 120);   // hear the new level right away
       toast(String("Speaker ") + AudioOut::volume() + "%");
       break;
     case A_SPK_MUTE:
