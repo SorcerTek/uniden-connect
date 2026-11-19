@@ -9,6 +9,7 @@
 #include "settings.h"
 #include "calls.h"
 #include "ota.h"
+#include "version.h"
 #include <WiFi.h>
 #include <time.h>
 #include <vector>
@@ -69,8 +70,12 @@ static bool halfJpeg(const uint8_t* d, uint32_t len) {
 }
 
 static void halfStatus(const char* status) {
-  if (!status || !*status) return;
   LGFX_Sprite& h = halfSprite();
+  h.setFont(&fonts::Font0);                       // version in the bottom-right corner
+  h.setTextDatum(textdatum_t::bottom_right);
+  h.setTextColor(0x8410);
+  h.drawString("v" UC_VERSION, 636, 357);
+  if (!status || !*status) return;
   h.setFont(&fonts::DejaVu18);
   h.setTextDatum(textdatum_t::bottom_center);
   h.setTextColor(0x8410);
@@ -627,7 +632,7 @@ static String dimAfterText(uint16_t s) {
 }
 
 static void pageSettings() {
-  header("Settings");
+  header("Settings", "Uniden Connect v" UC_VERSION);
   const auto& c = Settings::get();
   struct { const char* label; String value; } rows[] = {
     {"Brightness", String(c.brightness) + "%"},
@@ -1251,7 +1256,11 @@ void openSetup(bool firstRun) {
 }
 
 static void drawBootStatus(const char* status) {
-  if (!status || !*status) return;
+  s_canvas.setFont(&fonts::Font0);                // version in the bottom-right corner
+  s_canvas.setTextDatum(textdatum_t::bottom_right);
+  s_canvas.setTextColor(C_DIM);
+  s_canvas.drawString("v" UC_VERSION, W - 4, H - 3);
+  if (!status || !*status) { s_canvas.setTextDatum(textdatum_t::top_left); return; }
   s_canvas.setFont(&fonts::Font2);
   s_canvas.setTextDatum(textdatum_t::bottom_center);
   s_canvas.setTextColor(C_DIM);

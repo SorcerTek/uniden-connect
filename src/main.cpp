@@ -13,6 +13,12 @@
 #include <Wire.h>
 #include <time.h>
 #include "config.h"
+#include "version.h"
+#if defined(BOARD_TAB5)
+#define UC_BOARD "M5Stack Tab5"
+#else
+#define UC_BOARD "Freenove FNK0104N"
+#endif
 #include "settings.h"
 #include "board.h"
 #if defined(BOARD_TAB5)
@@ -41,7 +47,7 @@ void setup() {
   Power::begin();                    // release pins held during power-off sleep
   Serial.begin(115200);
   delay(200);
-  Serial.println("\nUniden Connect starting");
+  Serial.println("\nUniden Connect v" UC_VERSION " starting (" UC_BOARD ")");
 
   if (!psramFound()) Serial.println("WARNING: PSRAM not found - check platformio.ini memory settings");
   Settings::begin();

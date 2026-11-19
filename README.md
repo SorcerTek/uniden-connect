@@ -21,6 +21,13 @@ What it does:
 
 The scanner is expected at **192.168.1.2** by default. Change it on the board's setup screen.
 
+**Current version: v2.0.0** (shown under SETTINGS and on the boot screen).
+
+| Version | Date | What changed |
+|---|---|---|
+| v2.0.0 | 2026-11-19 | M5Stack Tab5 support (all display versions, Launcher install, smooth 1280x720 display, auto-flip, louder speaker). Both boards: POWER button on the KEYS page, Wi-Fi icon, board IP on the setup screen, instant volume beep. |
+| v1.0.0 | 2026-11-18 | First release for the Freenove FNK0104N. |
+
 ---
 
 ## 1. One-time setup on your Mac
