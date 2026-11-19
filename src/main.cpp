@@ -15,6 +15,9 @@
 #include "config.h"
 #include "settings.h"
 #include "board.h"
+#if defined(BOARD_TAB5)
+#include "esp_hosted.h"
+#endif
 #if !defined(BOARD_TAB5)
 #include "touch_st77922.h"
 #endif
@@ -56,10 +59,25 @@ void setup() {
   Battery::begin();
   Calls::begin();
 
+#if defined(BOARD_TAB5)
+  WiFi.setPins(TAB5_WIFI_SDIO_PINS);   // the Wi-Fi chip is an ESP32-C6 on SDIO (ESP-Hosted)
+#endif
   WiFi.mode(WIFI_STA);
+#if defined(BOARD_TAB5)
+  {
+    // Wait until the Wi-Fi chip answers before connecting. Starting the connection while
+    // the SDIO link is still settling makes ESP-Hosted start the network twice and crash
+    // ("netif already added"). Asking for its firmware version is a reliable wait.
+    esp_hosted_coprocessor_fwver_t v = {};
+    if (esp_hosted_get_coprocessor_fwversion(&v) == 0)
+      Serial.printf("Wi-Fi chip (ESP32-C6) firmware %u.%u.%u\n", (unsigned)v.major1, (unsigned)v.minor1, (unsigned)v.patch1);
+  }
+#endif
+#if !defined(BOARD_TAB5)
   WiFi.setSleep(false);              // keeps audio latency low
   WiFi.setAutoReconnect(true);
   WiFi.setHostname(OTA_HOSTNAME);
+#endif
   configTzTime(TIMEZONE, NTP_SERVER_1, NTP_SERVER_2);   // clock syncs once Wi-Fi is up
   RtspAudio::begin();                // its task waits for Wi-Fi by itself
 

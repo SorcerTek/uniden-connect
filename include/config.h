@@ -68,6 +68,8 @@
 #define TAB5_SD_MISO        39
 #define TAB5_SD_MOSI        44
 #define TAB5_SD_CS          42
+// ESP32-C6 Wi-Fi chip on SDIO (ESP-Hosted): CLK, CMD, D0-D3, RESET
+#define TAB5_WIFI_SDIO_PINS 12, 13, 11, 10, 9, 8, 15
 
 // ===============================================================
 //  Board wiring - Freenove FNK0104N. You should not need to change these.

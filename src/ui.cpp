@@ -1087,6 +1087,9 @@ static void serialDebug() {
     } else {
       Serial.write((const uint8_t*)"SHOT", 4);   // 320x480 panel-order frame
     }
+#if ARDUINO_USB_MODE
+    Serial.setTxTimeoutMs(2000);                 // wait for the computer instead of dropping data
+#endif
     while (left) {
       size_t n = Serial.write(p, min<size_t>(left, 512));
       p += n; left -= n;
