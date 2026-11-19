@@ -17,6 +17,7 @@ bool beginDisplay();            // panel, backlight and the full-screen canvas
 LGFX_Sprite& canvas();          // landscape canvas the UI draws into
 void present();                 // send the canvas to the screen
 void presentRect(int x, int y, int w, int h);   // send just this part of the canvas (canvas pixels)
+void presentHalf(LGFX_Sprite& half);            // Tab5: show a half-size (640x360) image doubled, straight to the screen
 int frameWidth();               // canvas buffer layout (for screenshots): width, height in
 int frameHeight();              //   buffer order, and whether pixels are little-endian RGB565
 bool frameLittleEndian();

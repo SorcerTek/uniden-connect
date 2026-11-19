@@ -22,6 +22,61 @@ static const int W = 480, H = 320;
 extern const uint8_t kLogoStart[] asm("_binary_data_boot_logo_jpg_start");
 extern const uint8_t kLogoEnd[]   asm("_binary_data_boot_logo_jpg_end");
 extern const uint8_t kAnimStart[] asm("_binary_data_boot_anim_bin_start");
+#if defined(BOARD_TAB5)
+#include <driver/jpeg_decode.h>
+// 640x360 versions for the Tab5 (shown doubled, straight to the screen)
+extern const uint8_t kLogo5Start[] asm("_binary_data_tab5_boot_logo_jpg_start");
+extern const uint8_t kLogo5End[]   asm("_binary_data_tab5_boot_logo_jpg_end");
+extern const uint8_t kAnim5Start[] asm("_binary_data_tab5_boot_anim_bin_start");
+static LGFX_Sprite* s_half = nullptr;
+// The P4's hardware JPEG decoder writes straight into the half-size sprite's memory
+// (the software decoder takes ~80 ms per 640x360 frame).
+static jpeg_decoder_handle_t s_jpeg = nullptr;
+static uint8_t* s_jpegIn = nullptr;
+static size_t s_jpegInSize = 0, s_halfBufSize = 0;
+static uint8_t* s_halfBuf = nullptr;
+
+static LGFX_Sprite& halfSprite() {
+  if (!s_half) {
+    s_half = new LGFX_Sprite(&Board::canvas());
+    jpeg_decode_memory_alloc_cfg_t outCfg = {JPEG_DEC_ALLOC_OUTPUT_BUFFER};
+    s_halfBuf = (uint8_t*)jpeg_alloc_decoder_mem(640 * 368 * 2, &outCfg, &s_halfBufSize);   // rows padded to 16
+    if (s_halfBuf) {
+      s_half->setBuffer(s_halfBuf, 640, 360, Board::canvas().getColorDepth());
+      jpeg_decode_engine_cfg_t ec = {0, 200};
+      jpeg_decode_memory_alloc_cfg_t inCfg = {JPEG_DEC_ALLOC_INPUT_BUFFER};
+      if (jpeg_new_decoder_engine(&ec, &s_jpeg) == ESP_OK)
+        s_jpegIn = (uint8_t*)jpeg_alloc_decoder_mem(64 * 1024, &inCfg, &s_jpegInSize);
+    } else {
+      s_half->setPsram(true);
+      s_half->setColorDepth(Board::canvas().getColorDepth());
+      s_half->createSprite(640, 360);
+    }
+  }
+  return *s_half;
+}
+
+// Decode a 640x360 JPEG into the half-size sprite (hardware if possible).
+static bool halfJpeg(const uint8_t* d, uint32_t len) {
+  LGFX_Sprite& h = halfSprite();
+  if (s_jpeg && s_jpegIn && len <= s_jpegInSize) {
+    memcpy(s_jpegIn, d, len);
+    jpeg_decode_cfg_t cfg = {JPEG_DECODE_OUT_FORMAT_RGB565, JPEG_DEC_RGB_ELEMENT_ORDER_BGR, JPEG_YUV_RGB_CONV_STD_BT601};
+    uint32_t out = 0;
+    if (jpeg_decoder_process(s_jpeg, &cfg, s_jpegIn, len, s_halfBuf, s_halfBufSize, &out) == ESP_OK) return true;
+  }
+  return h.drawJpg(d, len, 0, 0);
+}
+
+static void halfStatus(const char* status) {
+  if (!status || !*status) return;
+  LGFX_Sprite& h = halfSprite();
+  h.setFont(&fonts::DejaVu18);
+  h.setTextDatum(textdatum_t::bottom_center);
+  h.setTextColor(0x8410);
+  h.drawString(status, 320, 355);
+}
+#endif
 // The UI is laid out on a logical 480x320 screen. Pen draws it onto the board's
 // canvas, scaling positions and swapping in larger fonts on bigger screens
 // (scale 1 on the FNK0104N; 2.67 x 2.25 on the Tab5's 1280x720).
@@ -1177,6 +1232,16 @@ static void drawBootStatus(const char* status) {
 }
 
 void showLogo(const char* status) {
+#if defined(BOARD_TAB5)
+  {
+    LGFX_Sprite& h = halfSprite();
+    if (!halfJpeg(kLogo5Start, kLogo5End - kLogo5Start)) h.fillScreen(C_BG);
+    halfStatus(status);
+    Board::presentHalf(h);
+    s_regionsValid = false;
+    return;
+  }
+#endif
   s_canvas.fillScreen(C_BG);
   s_canvas.drawJpg(kLogoStart, kLogoEnd - kLogoStart, 0, 0);
   drawBootStatus(status);
@@ -1187,23 +1252,40 @@ void showLogo(const char* status) {
 void bootAnimFrame(const char* status) {
   static uint16_t frame = 0;
   static uint32_t nextAt = 0;
+#if defined(BOARD_TAB5)
+  const uint8_t* a = kAnim5Start;
+#else
   const uint8_t* a = kAnimStart;
+#endif
   if (memcmp(a, "UCA1", 4) != 0) { showLogo(status); delay(100); return; }
   uint16_t count = a[4] | (a[5] << 8);
   uint16_t ms = a[6] | (a[7] << 8);
   const uint8_t* e = a + 8 + 8 * frame;
   uint32_t off = e[0] | (e[1] << 8) | (e[2] << 16) | ((uint32_t)e[3] << 24);
   uint32_t len = e[4] | (e[5] << 8) | (e[6] << 16) | ((uint32_t)e[7] << 24);
+#if defined(BOARD_TAB5)
+  LGFX_Sprite& h = halfSprite();
+  if (!halfJpeg(a + off, len)) halfJpeg(kLogo5Start, kLogo5End - kLogo5Start);
+  halfStatus(status);
+  int32_t wait = (int32_t)(nextAt - millis());
+  if (wait > 0 && wait <= ms) delay(wait);
+  Board::presentHalf(h);
+  s_regionsValid = false;
+#else
   if (!s_canvas.drawJpg(a + off, len, 0, 0)) s_canvas.drawJpg(kLogoStart, kLogoEnd - kLogoStart, 0, 0);
   drawBootStatus(status);
   int32_t wait = (int32_t)(nextAt - millis());
   if (wait > 0 && wait <= ms) delay(wait);
   Board::present();
-  nextAt = millis() + ms;
+#endif
+  // steady frame rate: the next frame is due one interval after this one was due
+  uint32_t now = millis();
+  nextAt = ((int32_t)(now - nextAt) > (int32_t)ms) ? now + ms : nextAt + ms;
   frame = (frame + 1) % count;
 }
 
 void showMessage(const char* line1, const char* line2) {
+  s_regionsValid = false;                         // whole screen replaced
   s_canvas.fillScreen(C_BG);
   s_canvas.setTextDatum(textdatum_t::middle_center);
   s_canvas.setFont(&fonts::FreeSansBold18pt7b);
@@ -1219,8 +1301,8 @@ void showMessage(const char* line1, const char* line2) {
   Board::present();
 }
 
-// Serial debug helper: "S" sends a screenshot (raw RGB565 of the 320x480 frame buffer),
-// "P<n>" shows page n. Used for checking layouts from a computer.
+// Serial debug helper: "S" sends a screenshot, "P<n>" shows page n, "L" shows the boot
+// logo. Used for checking layouts from a computer.
 static void serialDebug() {
   if (!Serial.available()) return;
   int c = Serial.read();
@@ -1244,6 +1326,8 @@ static void serialDebug() {
       p += n; left -= n;
       if (!n) delay(2);
     }
+  } else if (c == 'L') {                          // show the boot logo (checking colours)
+    showLogo("logo test");
   } else if (c == 'P') {
     uint32_t t = millis();
     while (!Serial.available() && millis() - t < 200) delay(1);

@@ -50,6 +50,7 @@ bool beginDisplay() {
 LGFX_Sprite& canvas() { return s_canvas; }
 void present() { St77922::pushFrame((const uint16_t*)s_canvas.getBuffer()); }
 void presentRect(int, int, int, int) { present(); }
+void presentHalf(LGFX_Sprite&) {}
 void setBrightness(int pct) { St77922::setBrightness(pct); }
 
 bool touch(int& x, int& y) {

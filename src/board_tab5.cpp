@@ -260,6 +260,33 @@ void present() {
     s_canvas->pushSprite(0, 0);
   }
 }
+// Show a half-size landscape image (640x360, same pixel format) doubled to fill the
+// screen, written straight into the frame buffer in the panel's own orientation.
+// Used for the boot logo and animation: no canvas, no 1.8 MB copy.
+void presentHalf(LGFX_Sprite& half) {
+  if (!s_fb) { half.pushRotateZoom(s_canvas, s_canvas->width() / 2, s_canvas->height() / 2, 0, 2, 2); present(); return; }
+  const int sw = half.width(), sh = half.height();
+  auto* src = (const uint16_t*)half.getBuffer();
+  static uint16_t* line = nullptr;
+  if (!line) line = (uint16_t*)heap_caps_malloc(s_nativeW * 2, MALLOC_CAP_INTERNAL);
+  for (int sx = 0; sx < sw && sx * 2 < s_nativeH; sx++) {
+    for (int sy = 0; sy < sh; sy++) {               // one native row = one landscape column
+      uint16_t v = src[sy * sw + sx];
+      int c0 = s_col0 + (2 * sy) * s_colStep, c1 = c0 + s_colStep;
+      if ((unsigned)c0 < (unsigned)s_nativeW) line[c0] = v;
+      if ((unsigned)c1 < (unsigned)s_nativeW) line[c1] = v;
+    }
+    for (int k = 0; k < 2; k++) {
+      int r = s_row0 + (2 * sx + k) * s_rowStep;
+      if ((unsigned)r < (unsigned)s_nativeH) memcpy(s_fb + (size_t)r * s_nativeW, line, s_nativeW * 2);
+    }
+  }
+  esp_cache_msync(s_fb, s_fbLen, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+  // the screen no longer matches the canvas: next update must copy everything
+  if (s_rowHash) for (int y = 0; y < s_nativeH; y++) s_rowHash[y] = ~0u;
+  if (s_bandHash) for (int k = 0; k < s_nBands; k++) s_bandHash[k] = ~0u;
+}
+
 // Copy one rectangle of the canvas (canvas pixels) to the screen.
 void presentRect(int x, int y, int w, int h) {
   if (!s_fb) { present(); return; }
