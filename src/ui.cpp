@@ -69,16 +69,23 @@ static bool halfJpeg(const uint8_t* d, uint32_t len) {
   return h.drawJpg(d, len, 0, 0);
 }
 
+// The half-size sprite shares its memory with the hardware JPEG decoder, which (like the
+// screen) stores RGB565 little-endian, while the sprite itself writes byte-swapped
+// RGB565. Text colours are therefore given byte-swapped so they come out right.
+static uint16_t halfColor(LGFX_Sprite& h, uint16_t c) {
+  return h.getColorDepth() == lgfx::rgb565_2Byte ? (uint16_t)((c >> 8) | (c << 8)) : c;
+}
+
 static void halfStatus(const char* status) {
   LGFX_Sprite& h = halfSprite();
   h.setFont(&fonts::Font0);                       // version in the bottom-right corner
   h.setTextDatum(textdatum_t::bottom_right);
-  h.setTextColor(0x8410);
+  h.setTextColor(halfColor(h, 0x8410));
   h.drawString("v" UC_VERSION, 636, 357);
   if (!status || !*status) return;
   h.setFont(&fonts::DejaVu18);
   h.setTextDatum(textdatum_t::bottom_center);
-  h.setTextColor(0x8410);
+  h.setTextColor(halfColor(h, 0x8410));
   h.drawString(status, 320, 355);
 }
 #endif
