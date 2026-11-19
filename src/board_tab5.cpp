@@ -301,6 +301,7 @@ void presentRect(int x, int y, int w, int h) {
   for (int r = r0; r <= r1; r++) {
     size_t off = (size_t)r * s_nativeW + c0;
     memcpy(s_fb + off, src + off, seg);
+    if (s_rowHash) s_rowHash[r] = ~0u;   // the next full update must re-check this row
   }
   uint8_t* a0 = (uint8_t*)(s_fb + (size_t)r0 * s_nativeW + c0);
   uint8_t* a1 = (uint8_t*)(s_fb + (size_t)r1 * s_nativeW + c1 + 1);
