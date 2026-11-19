@@ -76,7 +76,8 @@ would contain it, so empty it before sharing a build with anyone.
 
 ## 5. Scanner settings
 
-On the SDS200, make sure the network is set up and it has the IP **192.168.1.2**
+On the SDS200, make sure the network is set up and check the scanners IP address. 
+(It is HIGHLY recommended to set a reserved IP address for your scanner in your router).
 (Menu > Settings > Network / LAN). The firmware uses:
 
 | What | How | Port |
@@ -84,8 +85,8 @@ On the SDS200, make sure the network is set up and it has the IP **192.168.1.2**
 | Status and key presses | UDP "virtual serial" commands (`GSI`, `KEY`, `JPM`, `HLD`, `MSM`) | 50536 |
 | Audio | RTSP stream `rtsp://192.168.1.2/au:scanner.au` (RTP over UDP) | 554 |
 
-Only one app can usually pull the audio stream at a time, so close ProScan / VLC / Sentinel audio
-if the board shows "PLAY failed" or "SETUP failed".
+Only one app can usually pull the audio stream at a time, so close ProScan / VLC / Sentinel audio / or the Siren app,
+if the board shows "PLAY failed" or "SETUP failed". If the audio still isn't working tap keys / settings / reboot scanner (requires a double tap)
 
 ## 6. Using it
 
@@ -97,7 +98,7 @@ goes to the main screen anyway, which shows "Scanner not responding" until it do
 **Main screen**
 
 - Top bar: green dot = scanner answering, the time (shown once the scanner is connected; "SDS200" until then), second dot = audio stream (green while audio
-  plays), a red **REC** while a call is being recorded, SPK = board speaker volume, battery, signal bars.
+  stream is active), a red **REC** while a call is being recorded, SPK = board speaker volume, battery, signal bars.
 - Middle: system (blue), department (yellow), channel (big), then frequency / TGID / mode,
   service type, and site / RSSI / scanner info. An orange **HOLD** tag shows what's held.
 - Buttons: SPK - / SPK + (board speaker volume), MUTE (board speaker only), KEYS.
@@ -128,7 +129,7 @@ Tap **SCAN** to go back to normal scanning.
 
 **Key light**: the buttons look like backlit scanner keys. Under **SETTINGS**, tap one of the ten
 sample keys (Amber, Orange, Red, Yellow, Green, Ice, Blue, Purple, Pink, White) to change the
-backlight colour; it changes straight away and is remembered. Active buttons (MUTE on, SCAN/WX,
+backlight color; it changes straight away and is remembered. Active buttons (MUTE on, SCAN/WX,
 held SYSTEM/DEPT/CHAN, REC ON) show a lit bar along the top.
 
 **Settings**: Brightness, Dim after (Never / 30 s / 1 / 2 / 5 / 10 min) and Dimmed level (Off or
@@ -193,7 +194,7 @@ upload new firmware without plugging it in:
 3. Click **Upload** (→). The board shows "Updating... NN%", then restarts with the new version.
 4. Switch back to **env:fnk0104n** for USB uploads.
 
-The board must be switched on and on the same network as your Mac. It's found as
+The board must be switched on and on the same network as your computer. It's found as
 `uniden-connect.local`. `secrets.ini` is never uploaded to GitHub.
 
 ---
