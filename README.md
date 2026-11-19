@@ -25,7 +25,7 @@ The scanner is expected at **192.168.1.2** by default. Change it on the board's 
 
 | Version | Date | What changed |
 |---|---|---|
-| v2.0.1 | 2026-11-19 | Tab5: after auto-rotating, the whole screen is redrawn (no upside-down "ghost" top bar over the buttons). |
+| v2.0.1 | 2026-11-19 | Tab5: after auto-rotating, the whole screen is redrawn (no upside-down "ghost" top bar over the buttons); version and status text now visible on the boot screen; Settings shows "Version x.y.z". |
 | v2.0.0 | 2026-11-19 | M5Stack Tab5 support (all display versions, Launcher install, smooth 1280x720 display, auto-flip, louder speaker). Both boards: POWER button on the KEYS page, Wi-Fi icon, board IP on the setup screen, instant volume beep. |
 | v1.0.0 | 2026-11-18 | First release for the Freenove FNK0104N. |
 
