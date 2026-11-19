@@ -3,3 +3,4 @@
 include/secrets.h
 secrets.ini
 .backups/
+release/
