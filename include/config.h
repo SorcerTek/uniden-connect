@@ -71,7 +71,7 @@
 #define TOUCH_SWAP_XY       0
 
 // ---- M5Stack Tab5 (only used by the tab5 build) ------------------
-#define TAB5_ROTATION       1                // 1 or 3: landscape; flip if upside down
+#define TAB5_ROTATION       3                // 1 or 3: landscape; flip if upside down
 #define TAB5_SD_SCK         43               // microSD in SPI mode
 #define TAB5_SD_MISO        39
 #define TAB5_SD_MOSI        44
