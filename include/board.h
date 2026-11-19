@@ -29,6 +29,7 @@ LGFX_Sprite& band(int k, int& xOffset);   // cleared band k; xOffset = its left 
 void presentBand(int k);
 void setBrightness(int pct);    // 0-100
 bool touch(int& x, int& y);     // finger position in canvas pixels; false if not touched
+bool orientationChanged();      // the screen was turned (Tab5 auto-rotate): redraw everything
 bool hasBootButton();           // BOOT button opens the power menu
 bool hasLauncher();             // installed under bmorcelli's Launcher (offer "exit to Launcher")
 void exitToLauncher();

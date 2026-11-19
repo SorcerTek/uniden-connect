@@ -73,6 +73,7 @@ int bands() { return 0; }
 LGFX_Sprite& band(int, int& xOffset) { xOffset = 0; return s_canvas; }
 void presentBand(int) {}
 
+bool orientationChanged() { return false; }
 bool hasBootButton() { return true; }
 bool hasLauncher() { return false; }
 void exitToLauncher() {}

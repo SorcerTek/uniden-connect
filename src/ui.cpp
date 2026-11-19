@@ -1141,6 +1141,8 @@ void loop() {
   }
   if (Power::bootPressed() && s_page == PAGE_POWER) { s_page = s_pageBeforePower; s_dirty = true; }
 
+  if (Board::orientationChanged()) { s_pressed = -1; s_dirty = true; }
+
   String err = Sds200::takeError();
   if (err.length()) toast(err);
 

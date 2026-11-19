@@ -218,8 +218,53 @@ void present() {
 }
 void setBrightness(int pct) { M5.Display.setBrightness(constrain(pct, 0, 100) * 255 / 100); }
 
+// ---- automatic 180-degree flip from the IMU ----
+// Upright in TAB5_ROTATION the accelerometer reads about +1 g on X; held the other way up
+// it reads -1 g. Portrait or lying flat keeps the current orientation.
+static bool s_flipped = false;
+static volatile bool s_rotated = false;
+
+static void applyFlip(bool flipped) {
+  s_flipped = flipped;
+  int disp = flipped ? (TAB5_ROTATION + 2) % 4 : TAB5_ROTATION;
+  M5.Display.setRotation(disp);                      // touch follows the display rotation
+  int r = s_canvas->getRotation();
+  int r2 = (((r & 3) + 2) & 3) | (r & 4);             // same mapping turned 180 degrees
+  s_canvas->setRotation(r2);
+  if (s_band) {
+    s_band->setRotation(r2);
+    s_row0 = s_nativeH - 1 - s_row0;
+    s_rowStep = -s_rowStep;
+    for (int k = 0; k < s_nBands; k++) s_bandHash[k] = ~0u;   // redraw everything
+  }
+  s_rotated = true;
+}
+
+static void autoRotate() {
+#if TAB5_AUTO_ROTATE
+  static uint32_t last = 0, since = 0;
+  static int pending = 0;
+  if (millis() - last < 200) return;
+  last = millis();
+  float ax, ay, az;
+  if (!M5.Imu.getAccel(&ax, &ay, &az)) return;
+  int want = ax > 0.6f ? 1 : ax < -0.6f ? -1 : 0;     // 1 = normal, -1 = upside down
+  bool flip = want < 0;
+  if (want == 0 || flip == s_flipped) { pending = 0; return; }
+  if (pending != want) { pending = want; since = millis(); return; }
+  if (millis() - since >= 800) { pending = 0; applyFlip(flip); }
+#endif
+}
+
+bool orientationChanged() {
+  bool r = s_rotated;
+  s_rotated = false;
+  return r;
+}
+
 bool touch(int& x, int& y) {
   M5.update();
+  autoRotate();
   auto d = M5.Touch.getDetail();
   if (!d.isPressed()) return false;
   x = d.x;
@@ -388,4 +433,5 @@ void off() {
 
 }  // namespace Power
 #endif  // BOARD_TAB5
+
 
