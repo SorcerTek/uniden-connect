@@ -19,6 +19,8 @@
 #include <lgfx/v1/platforms/esp32p4/Panel_DSI.hpp>
 #include <atomic>
 
+namespace AudioOut { void pollHeadphones(); }
+
 // =====================================================================
 //  Board
 // =====================================================================
@@ -330,6 +332,7 @@ bool orientationChanged() {
 bool touch(int& x, int& y) {
   M5.update();
   autoRotate();
+  AudioOut::pollHeadphones();
   auto d = M5.Touch.getDetail();
   if (!d.isPressed()) return false;
   x = d.x;
@@ -400,6 +403,17 @@ bool muted() { return s_muted; }
 
 void beep(int hz, int ms) { M5.Speaker.tone(hz, ms, 7); }
 
+// Headphone-detect line on the Tab5's IO expander (PI4IOE5V6408 at 0x43, input bit 7).
+// For now this only reports changes on the Serial Monitor.
+void pollHeadphones() {
+  static uint32_t last = 0;
+  static int prev = -1;
+  if (millis() - last < 500) return;
+  last = millis();
+  int v = (M5.In_I2C.readRegister8(0x43, 0x0F, 400000) >> 7) & 1;
+  if (v != prev) { Serial.printf("Headphone detect line: %d\n", v); prev = v; }
+}
+
 static void audioTask(void*) {
   // Three buffers: one playing, one queued in M5.Speaker, one being filled.
   static int16_t* bufs[3];
@@ -435,7 +449,13 @@ static void audioTask(void*) {
 bool begin() {
   s_ring = (int16_t*)heap_caps_malloc(RING * sizeof(int16_t), MALLOC_CAP_SPIRAM);
   if (!s_ring) return false;
-  if (!M5.Speaker.isEnabled()) M5.Speaker.begin();
+  // M5Unified gives the Tab5 speaker a digital gain of only 4, which is quiet;
+  // TAB5_SPK_GAIN raises it (the 3.5 mm jack gets the same signal).
+  M5.Speaker.end();
+  auto sc = M5.Speaker.config();
+  sc.magnification = TAB5_SPK_GAIN;
+  M5.Speaker.config(sc);
+  M5.Speaker.begin();
   applyVolume();
   xTaskCreatePinnedToCore(audioTask, "audio", 4096, nullptr, 20, nullptr, 0);
   return true;

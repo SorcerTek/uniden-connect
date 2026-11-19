@@ -75,6 +75,7 @@
 #define TAB5_AUTO_ROTATE    1                // 1 = turn the picture over when the Tab5 is turned over
 #define TAB5_FB_CHUNK       4096             // screen writes: bytes per piece ...
 #define TAB5_FB_GAP_US      30               // ... and pause after each (avoids display underruns)
+#define TAB5_SPK_GAIN       12               // speaker / headphone digital gain (M5Unified default 4)
 #define TAB5_BANDED         0                // 1 = draw in bands in internal RAM, 0 = full canvas in PSRAM
 #define TAB5_DMA_BURST      16               // DMA burst size for screen copies (8-128)
 #define TAB5_SD_SCK         43               // microSD in SPI mode

@@ -36,6 +36,7 @@ void setup() {
   cfg.internal_spk = true;
   cfg.internal_mic = false;
   M5.begin(cfg);                     // display, touch, speaker, power, Wi-Fi (ESP32-C6) pins
+  M5.Display.setBrightness(0);       // dark until the logo is drawn (the panel shows garbage while starting)
 #endif
   Power::begin();                    // release pins held during power-off sleep
   Serial.begin(115200);
