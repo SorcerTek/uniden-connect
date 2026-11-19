@@ -1301,7 +1301,7 @@ void showMessage(const char* line1, const char* line2) {
   Board::present();
 }
 
-// Serial debug helper: "S" sends a screenshot, "P<n>" shows page n, "L" shows the boot
+// Serial debug helper: "S" sends a screenshot, "P<n>" shows page n, "B" beeps, "L" shows the boot
 // logo. Used for checking layouts from a computer.
 static void serialDebug() {
   if (!Serial.available()) return;
@@ -1326,6 +1326,8 @@ static void serialDebug() {
       p += n; left -= n;
       if (!n) delay(2);
     }
+  } else if (c == 'B') {                          // play the volume beep
+    AudioOut::beep(880, 120);
   } else if (c == 'L') {                          // show the boot logo (checking colours)
     showLogo("logo test");
   } else if (c == 'P') {

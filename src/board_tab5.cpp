@@ -428,7 +428,18 @@ int volume() { return s_volume; }
 void setMuted(bool m) { s_muted = m; applyVolume(); }
 bool muted() { return s_muted; }
 
-void beep(int hz, int ms) { M5.Speaker.tone(hz, ms, 7); }
+// Beep: a 16-bit sine played through the same path as the scanner audio (M5Unified's
+// built-in tone() waveform is too quiet to hear on the Tab5).
+void beep(int hz, int ms) {
+  static const uint32_t RATE = 16000;
+  static int16_t buf[RATE / 2];                    // up to 500 ms
+  size_t n = min<size_t>(sizeof(buf) / 2, RATE * ms / 1000);
+  for (size_t i = 0; i < n; i++) {
+    float env = min(1.0f, min(i, n - i) / 160.0f);  // 10 ms fade in/out (no clicks)
+    buf[i] = (int16_t)(12000 * env * sinf(2.0f * PI * hz * i / RATE));
+  }
+  M5.Speaker.playRaw(buf, n, RATE, false, 1, 7, true);
+}
 
 // Headphone-detect line on the Tab5's IO expander (PI4IOE5V6408 at 0x43, input bit 7).
 // For now this only reports changes on the Serial Monitor.
