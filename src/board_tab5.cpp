@@ -68,6 +68,9 @@ template <typename T> static void drawMarkers(T& g) {
 }
 
 bool beginDisplay() {
+  // Backlight off until the first real frame is on screen: the DSI panel shows garbage
+  // and flickers while it starts up (same fix as the AetherScan firmware).
+  M5.Display.setBrightness(0);
   M5.Display.setRotation(TAB5_ROTATION);    // (M5.begin() already cleared the screen)
   int w = M5.Display.width(), h = M5.Display.height();
   s_nativeW = min(w, h);                  // the panel is portrait: 720 x 1280

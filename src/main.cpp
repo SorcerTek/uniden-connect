@@ -46,8 +46,8 @@ void setup() {
   Settings::begin();
 
   if (!Ui::begin()) Serial.println("Display / UI init failed");
-  Board::setBrightness(Settings::get().brightness);
   Ui::showLogo("Starting...");
+  Board::setBrightness(Settings::get().brightness);   // light up once the logo is drawn
 
 #if !defined(BOARD_TAB5)
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);
