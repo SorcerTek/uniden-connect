@@ -1,0 +1,40 @@
+#pragma once
+// Board abstraction: the few things that differ between supported hardware.
+//   BOARD_FNK0104N (default)  Freenove FNK0104N, 3.5" 480x320
+//   BOARD_TAB5                M5Stack Tab5, 5" 1280x720 (ESP32-P4)
+#include <Arduino.h>
+#if defined(BOARD_TAB5)
+  #include <M5Unified.h>          // M5GFX (LovyanGFX v1 inside), speaker, power, touch
+#else
+  #define LGFX_USE_V1
+  #include <LovyanGFX.hpp>
+#endif
+
+namespace Board {
+
+const char* name();
+bool beginDisplay();            // panel, backlight and the full-screen canvas
+LGFX_Sprite& canvas();          // landscape canvas the UI draws into
+void present();                 // send the canvas to the screen
+void presentRect(int x, int y, int w, int h);   // send just this part of the canvas (canvas pixels)
+void presentHalf(LGFX_Sprite& half);            // Tab5: show a half-size (640x360) image doubled, straight to the screen
+int frameWidth();               // canvas buffer layout (for screenshots): width, height in
+int frameHeight();              //   buffer order, and whether pixels are little-endian RGB565
+bool frameLittleEndian();
+const void* frameData();        // what is on screen now (for screenshots)
+
+// Banded drawing (Tab5): the UI is drawn band by band into a small buffer in fast
+// internal RAM and each band is sent to the screen. bands() == 0 means draw the whole
+// canvas and call present().
+int bands();
+LGFX_Sprite& band(int k, int& xOffset);   // cleared band k; xOffset = its left edge in canvas pixels
+void presentBand(int k);
+void bandsDone();                        // wait until the last band is on screen
+void setBrightness(int pct);    // 0-100
+bool touch(int& x, int& y);     // finger position in canvas pixels; false if not touched
+bool orientationChanged();      // the screen was turned (Tab5 auto-rotate): redraw everything
+bool hasBootButton();           // BOOT button opens the power menu
+bool hasLauncher();             // installed under bmorcelli's Launcher (offer "exit to Launcher")
+void exitToLauncher();
+
+}  // namespace Board

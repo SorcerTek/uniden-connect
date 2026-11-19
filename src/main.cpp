@@ -14,8 +14,13 @@
 #include <time.h>
 #include "config.h"
 #include "settings.h"
-#include "display_st77922.h"
+#include "board.h"
+#if defined(BOARD_TAB5)
+#include "esp_hosted.h"
+#endif
+#if !defined(BOARD_TAB5)
 #include "touch_st77922.h"
+#endif
 #include "audio_out.h"
 #include "rtsp_audio.h"
 #include "sds200.h"
@@ -26,6 +31,13 @@
 #include "ota.h"
 
 void setup() {
+#if defined(BOARD_TAB5)
+  auto cfg = M5.config();
+  cfg.internal_spk = true;
+  cfg.internal_mic = false;
+  M5.begin(cfg);                     // display, touch, speaker, power, Wi-Fi (ESP32-C6) pins
+  M5.Display.setBrightness(0);       // dark until the logo is drawn (the panel shows garbage while starting)
+#endif
   Power::begin();                    // release pins held during power-off sleep
   Serial.begin(115200);
   delay(200);
@@ -34,23 +46,39 @@ void setup() {
   if (!psramFound()) Serial.println("WARNING: PSRAM not found - check platformio.ini memory settings");
   Settings::begin();
 
-  if (!St77922::begin()) Serial.println("Display init failed");
-  St77922::setBrightness(Settings::get().brightness);
-  if (!Ui::begin()) Serial.println("UI init failed (not enough memory?)");
+  if (!Ui::begin()) Serial.println("Display / UI init failed");
   Ui::showLogo("Starting...");
+  Board::setBrightness(Settings::get().brightness);   // light up once the logo is drawn
 
+#if !defined(BOARD_TAB5)
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);
   if (!Touch::begin()) Serial.println("Touch controller not found");
+#endif
   if (!AudioOut::begin()) Serial.println("Audio init failed");
   AudioOut::setVolume(Settings::get().spkVolume);
   AudioOut::setMuted(Settings::get().muted);
   Battery::begin();
   Calls::begin();
 
+#if defined(BOARD_TAB5)
+  WiFi.setPins(TAB5_WIFI_SDIO_PINS);   // the Wi-Fi chip is an ESP32-C6 on SDIO (ESP-Hosted)
+#endif
   WiFi.mode(WIFI_STA);
+#if defined(BOARD_TAB5)
+  {
+    // Wait until the Wi-Fi chip answers before connecting. Starting the connection while
+    // the SDIO link is still settling makes ESP-Hosted start the network twice and crash
+    // ("netif already added"). Asking for its firmware version is a reliable wait.
+    esp_hosted_coprocessor_fwver_t v = {};
+    if (esp_hosted_get_coprocessor_fwversion(&v) == 0)
+      Serial.printf("Wi-Fi chip (ESP32-C6) firmware %u.%u.%u\n", (unsigned)v.major1, (unsigned)v.minor1, (unsigned)v.patch1);
+  }
+#endif
+#if !defined(BOARD_TAB5)
   WiFi.setSleep(false);              // keeps audio latency low
   WiFi.setAutoReconnect(true);
   WiFi.setHostname(OTA_HOSTNAME);
+#endif
   configTzTime(TIMEZONE, NTP_SERVER_1, NTP_SERVER_2);   // clock syncs once Wi-Fi is up
   RtspAudio::begin();                // its task waits for Wi-Fi by itself
 

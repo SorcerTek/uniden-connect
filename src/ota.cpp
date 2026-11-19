@@ -1,4 +1,14 @@
 #include "ota.h"
+#if defined(BOARD_TAB5)
+// Tab5 builds are installed with bmorcelli's Launcher, which owns the flash layout:
+// update through the Launcher instead of ArduinoOTA.
+namespace Ota {
+void begin() {}
+void restart() {}
+void loop() {}
+bool enabled() { return false; }
+}  // namespace Ota
+#else
 #include "config.h"
 #include "settings.h"
 #include "rtsp_audio.h"
@@ -64,3 +74,4 @@ void loop() {
 }
 
 }  // namespace Ota
+#endif  // BOARD_TAB5

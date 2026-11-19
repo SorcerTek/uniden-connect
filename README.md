@@ -1,7 +1,7 @@
 # Uniden Connect
 
 A touchscreen remote for the **Uniden SDS200** scanner, running on the
-**Freenove ESP32-S3 3.5" display (FNK0104N)**.
+**Freenove ESP32-S3 3.5" display (FNK0104N)** or the **M5Stack Tab5** (5", 1280x720).
 
 What it does:
 
@@ -16,7 +16,8 @@ What it does:
 - Favorites: one tap to hold the scanner on a saved department.
 - Clock, screen dimming when idle, settings remembered across restarts.
 - On-screen Wi-Fi / scanner setup, wireless (Wi-Fi) firmware updates.
-- Boot animation while it connects, and a power menu on the BOOT button (no power switch needed).
+- Boot animation while it connects, and a power menu (BOOT button, or KEYS > POWER).
+- Wi-Fi signal icon in the top bar; the setup screen shows the board's own IP address.
 
 The scanner is expected at **192.168.1.2** by default. Change it on the board's setup screen.
 
@@ -190,6 +191,42 @@ The board must be switched on and on the same network as your Mac. It's found as
 
 ---
 
+## 8. M5Stack Tab5 version
+
+The same firmware also runs on the M5Stack Tab5 (all display versions: ILI9881C, ST7123 and
+ST7121 are detected automatically). Everything works the same as on the 3.5" board, with these
+differences:
+
+- The screens are scaled up to the 5" 1280x720 display with larger, smooth fonts. The picture
+  turns over automatically when you turn the Tab5 upside down (`TAB5_AUTO_ROTATE`).
+- There is no BOOT button to hold: open the power menu from **KEYS > POWER**. It also has
+  **LAUNCHER** (back to bmorcelli's Launcher) when installed under it. Turn on with the Tab5's power button.
+- Battery level comes from the Tab5's battery pack (NP-F550), if fitted.
+- The speaker is louder than M5Stack's default (`TAB5_SPK_GAIN`); the 3.5 mm jack carries the same audio.
+- Wireless (OTA) updates are off on the Tab5: install new versions through the Launcher.
+- Bluetooth speakers aren't possible (the Tab5's ESP32-C6 is Bluetooth Low Energy only, no audio
+  streaming); use a Bluetooth transmitter on the 3.5 mm jack instead.
+
+**Building the Tab5 version**
+
+1. Once, build the Tab5 libraries package (downloads Espressif's official Arduino-ESP32 3.3.10
+   libraries for the Tab5's chip, with 200 MHz PSRAM and the matching Wi-Fi driver):
+   ```bash
+   python3 tools/make_tab5_libs.py
+   ```
+2. In VS Code pick **env:tab5** and click **Build**. The result is `.pio/build/tab5/firmware.bin`.
+3. Copy that file to the Tab5's SD card and install it from bmorcelli's **Launcher**
+   (SD > select the file > Install).
+
+Note: PlatformIO's built-in Python can't unpack the P4 compiler download (it lacks `lzma`
+support). If a Tab5 build stops with `riscv32-esp-elf-g++: command not found`, unpack
+`~/.platformio/dist/riscv32-esp-elf-*.tar.xz` with the Mac's `tar` into
+`~/.platformio/packages/toolchain-riscv32-esp`, or run PlatformIO from a Python 3.10+ that has
+`lzma`. On macOS, VS Code also needs **Local Network** permission (System Settings > Privacy &
+Security) for wireless uploads.
+
+---
+
 ## Troubleshooting
 
 | Problem | Fix |
@@ -218,6 +255,12 @@ include/config.h        scanner IP, ports, screen/touch/audio options, board pin
 include/secrets.h       optional first-boot Wi-Fi / update password (kept out of GitHub)
 secrets.ini             update password for wireless uploads (kept out of GitHub)
 src/main.cpp            start-up: screen, touch, audio, Wi-Fi, scanner
+include/board.h         what differs between boards (screen, canvas, touch, brightness)
+src/board_fnk0104n.cpp  FNK0104N board layer
+src/board_tab5.cpp      Tab5 board layer: M5GFX display (fast frame-buffer updates), touch,
+                        M5.Speaker audio, battery, power, auto-rotate
+partitions_tab5.csv     Tab5 partition table for USB flashing (the Launcher uses its own)
+tools/make_tab5_libs.py builds the Tab5 libraries package (200 MHz PSRAM)
 src/sds200.*            talks to the scanner over UDP 50536, reads GSI status
 src/rtsp_audio.*        connects to the scanner's RTSP audio stream
 src/audio_out.*         ES8311 codec + speaker amplifier + jitter buffer
@@ -231,7 +274,8 @@ src/power.*             BOOT button power menu (power off = deep sleep, restart)
 src/battery.*           battery level from the ADC
 data/boot_logo.jpg      boot logo, built into the firmware
 data/boot_anim.bin      boot animation frames, built into the firmware
-tools/make_boot_assets.sh  rebuilds the two files above from the GIF / logo
+data/tab5_boot_*        640x360 versions for the Tab5 (shown doubled, hardware JPEG decoding)
+tools/make_boot_assets.sh  rebuilds the boot files above from the GIF / logo
 ```
 
 ## Sources

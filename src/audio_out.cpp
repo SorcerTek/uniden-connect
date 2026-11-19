@@ -1,3 +1,4 @@
+#if !defined(BOARD_TAB5)   // FNK0104N only (Tab5 version: board_tab5.cpp)
 // ES8311 setup is a trimmed port of Espressif's esp-bsp es8311 driver
 // (Apache-2.0), using its clock coefficient entries for 4.096 MHz MCLK.
 #include "audio_out.h"
@@ -109,6 +110,9 @@ void push(const int16_t* samples, size_t n) {
 void flush() { s_flush = true; }
 void setStreamRate(uint32_t hz) { if (hz >= 4000 && hz <= 48000) s_streamRate = hz; }
 
+static std::atomic<uint32_t> s_toneLeft{0};      // tone samples still to play (see beep())
+static std::atomic<uint32_t> s_toneStep{0};      // 16.16 phase step per output sample
+
 static void audioTask(void*) {
   const int FRAMES = 256;                    // output frames per write
   static int16_t out[FRAMES * 2];            // stereo
@@ -144,6 +148,13 @@ static void audioTask(void*) {
         int32_t frac = phase & 0xFFFF;
         s = (int16_t)(prev + (((int32_t)(cur - prev) * frac) >> 16));
         phase += step;
+      }
+      if (s_toneLeft.load()) {                 // volume / alert tone
+        static uint32_t tph = 0;
+        tph += s_toneStep.load();
+        int32_t v = s + (int32_t)(9000 * sinf(2.0f * PI * (tph & 0xFFFF) / 65536.0f));
+        s = (int16_t)constrain(v, -32768, 32767);
+        s_toneLeft--;
       }
       out[i * 2] = s;
       out[i * 2 + 1] = s;
@@ -209,17 +220,11 @@ bool playing() { return millis() - s_lastAudioMs.load() < 1500; }
 uint32_t queued() { return s_head.load() - s_tail.load(); }
 uint32_t streamRate() { return s_streamRate.load(); }
 
+// Short tone mixed straight into the speaker output (does not wait for the jitter buffer).
 void beep(int hz, int ms) {
-  uint32_t rate = s_streamRate.load();
-  static int16_t buf[256];
-  uint32_t total = rate * ms / 1000, done = 0;
-  float ph = 0, step = 2.0f * PI * hz / rate;
-  while (done < total) {
-    size_t n = min<uint32_t>(256, total - done);
-    for (size_t i = 0; i < n; i++) { buf[i] = (int16_t)(12000 * sinf(ph)); ph += step; }
-    push(buf, n);
-    done += n;
-  }
+  s_toneStep = (uint32_t)(((uint64_t)hz << 16) / AUDIO_OUT_RATE);
+  s_toneLeft = (uint32_t)AUDIO_OUT_RATE * ms / 1000;
 }
 
 }  // namespace AudioOut
+#endif  // !BOARD_TAB5

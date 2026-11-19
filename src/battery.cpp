@@ -1,3 +1,4 @@
+#if !defined(BOARD_TAB5)   // FNK0104N only (Tab5 version: board_tab5.cpp)
 #include "battery.h"
 #include "config.h"
 
@@ -40,3 +41,4 @@ int percent() {
 }
 
 }  // namespace Battery
+#endif  // !BOARD_TAB5
