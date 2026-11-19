@@ -49,6 +49,14 @@
 #define BOOT_ANIM_MIN_MS      3000
 #define BOOT_ANIM_TIMEOUT_MS  25000
 
+// Shortest time between screen redraws. The Tab5's big screen shares slow PSRAM with
+// the display controller, so it redraws less often.
+#if defined(BOARD_TAB5)
+#define UI_MIN_FRAME_MS     140
+#else
+#define UI_MIN_FRAME_MS     40
+#endif
+
 // 1 or 3. Flip between them if the picture is upside down.
 #define SCREEN_ROTATION     1
 #define LCD_SPI_HZ          40000000         // 40 MHz is the safe value for this panel

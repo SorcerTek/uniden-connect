@@ -16,6 +16,9 @@ const char* name();
 bool beginDisplay();            // panel, backlight and the full-screen canvas
 LGFX_Sprite& canvas();          // landscape canvas the UI draws into
 void present();                 // send the canvas to the screen
+int frameWidth();               // canvas buffer layout (for screenshots): width, height in
+int frameHeight();              //   buffer order, and whether pixels are little-endian RGB565
+bool frameLittleEndian();
 void setBrightness(int pct);    // 0-100
 bool touch(int& x, int& y);     // finger position in canvas pixels; false if not touched
 bool hasBootButton();           // BOOT button opens the power menu

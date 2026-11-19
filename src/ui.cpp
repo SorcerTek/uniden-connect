@@ -1080,10 +1080,11 @@ static void serialDebug() {
     LGFX_Sprite& raw = Board::canvas();
     const uint8_t* p = (const uint8_t*)raw.getBuffer();
     size_t left = raw.bufferLength();
-    if (s_canvas.scaled()) {                     // "SHT2", width, height (u16 LE), then pixels
-      uint16_t wh[2] = {(uint16_t)raw.width(), (uint16_t)raw.height()};
-      Serial.write((const uint8_t*)"SHT2", 4);
-      Serial.write((const uint8_t*)wh, 4);
+    if (s_canvas.scaled()) {                     // "SHT3", width, height, little-endian flag (u16 LE each), pixels
+      uint16_t hdr[3] = {(uint16_t)Board::frameWidth(), (uint16_t)Board::frameHeight(), (uint16_t)Board::frameLittleEndian()};
+      left = (size_t)hdr[0] * hdr[1] * 2;
+      Serial.write((const uint8_t*)"SHT3", 4);
+      Serial.write((const uint8_t*)hdr, 6);
     } else {
       Serial.write((const uint8_t*)"SHOT", 4);   // 320x480 panel-order frame
     }
@@ -1167,7 +1168,7 @@ void loop() {
 
   // Refresh at least once a second (clock, audio indicator), and quickly on changes.
   uint32_t now = millis();
-  if ((s_dirty && now - s_lastDraw > 40) || now - s_lastDraw > 1000) {
+  if ((s_dirty && now - s_lastDraw > UI_MIN_FRAME_MS) || now - s_lastDraw > 1000) {
     s_dirty = false;
     s_lastDraw = now;
     redraw();

@@ -65,6 +65,10 @@ bool touch(int& x, int& y) {
   return x >= 0 && x < s_canvas.width() && y >= 0 && y < s_canvas.height();
 }
 
+int frameWidth() { return LCD_NATIVE_W; }
+int frameHeight() { return LCD_NATIVE_H; }
+bool frameLittleEndian() { return false; }
+
 bool hasBootButton() { return true; }
 bool hasLauncher() { return false; }
 void exitToLauncher() {}
