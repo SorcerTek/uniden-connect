@@ -632,7 +632,7 @@ static String dimAfterText(uint16_t s) {
 }
 
 static void pageSettings() {
-  header("Settings", "Uniden Connect v" UC_VERSION);
+  header("Settings", "Version " UC_VERSION);
   const auto& c = Settings::get();
   struct { const char* label; String value; } rows[] = {
     {"Brightness", String(c.brightness) + "%"},
