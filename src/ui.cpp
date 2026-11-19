@@ -438,22 +438,29 @@ static void drawStatusBar() {
   String a = Calls::replaying() ? String("replay") : AudioOut::muted() ? String("muted") : String(RtspAudio::status());
 
   // board speaker volume (right-aligned), REC to its left while recording
+  // (on big screens the SPK level uses a smaller font so it sits clear of REC)
+  const lgfx::IFont* spkFont = s_canvas.scaled() ? (const lgfx::IFont*)&fonts::Font0 : (const lgfx::IFont*)&fonts::Font2;
+  int spkY = s_canvas.scaled() ? 8 : 4;
   char buf[24];
   snprintf(buf, sizeof(buf), "SPK %d%%", AudioOut::volume());
   int right = W - 110;
+  s_canvas.setFont(spkFont);
   int levelsLeft = right - s_canvas.textWidth(buf);
   int textEnd = levelsLeft - 8;
   if (Calls::recordingNow()) {
-    int rx = levelsLeft - 40;
+    s_canvas.setFont(&fonts::Font2);
+    int recW = s_canvas.textWidth("REC");
+    int rx = levelsLeft - 8 - recW - 13;           // dot + gap + "REC", then a gap before SPK
     s_canvas.fillCircle(rx + 5, 12, 5, C_BAD);
     s_canvas.setTextColor(C_BAD);
     s_canvas.drawString("REC", rx + 13, 4);
     textEnd = rx - 6;
   }
   fitText(a, 110, 4, textEnd - 110, &fonts::Font2, C_DIM);
+  s_canvas.setFont(spkFont);
   s_canvas.setTextColor(C_TEXT);
   s_canvas.setTextDatum(textdatum_t::top_right);
-  s_canvas.drawString(buf, right, 4);
+  s_canvas.drawString(buf, right, spkY);
   s_canvas.setTextDatum(textdatum_t::top_left);
 
   drawBattery(W - 104, 6);
