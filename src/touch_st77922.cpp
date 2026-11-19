@@ -1,3 +1,4 @@
+#if !defined(BOARD_TAB5)   // FNK0104N only (Tab5 version: board_tab5.cpp)
 // ST77922 integrated touch, based on Freenove's ST77922_Touch driver and the
 // register notes in github.com/emailman/Freenove_FNK0104N_MicroPython.
 #include "touch_st77922.h"
@@ -81,3 +82,4 @@ bool read(int16_t& x, int16_t& y) {
 }
 
 }  // namespace Touch
+#endif  // !BOARD_TAB5

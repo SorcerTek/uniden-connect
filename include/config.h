@@ -62,6 +62,13 @@
 #define TOUCH_INVERT_Y      0
 #define TOUCH_SWAP_XY       0
 
+// ---- M5Stack Tab5 (only used by the tab5 build) ------------------
+#define TAB5_ROTATION       1                // 1 or 3: landscape; flip if upside down
+#define TAB5_SD_SCK         43               // microSD in SPI mode
+#define TAB5_SD_MISO        39
+#define TAB5_SD_MOSI        44
+#define TAB5_SD_CS          42
+
 // ===============================================================
 //  Board wiring - Freenove FNK0104N. You should not need to change these.
 // ===============================================================

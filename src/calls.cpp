@@ -3,7 +3,14 @@
 #include "settings.h"
 #include "audio_out.h"
 #include <FS.h>
+#if defined(BOARD_TAB5)
+#include <SD.h>                  // Tab5: SPI mode (SDMMC would clash with the Wi-Fi chip's SDIO link)
+#include <SPI.h>
+#define SDCARD SD
+#else
 #include <SD_MMC.h>
+#define SDCARD SD_MMC
+#endif
 #include <esp_heap_caps.h>
 #include <time.h>
 #include <atomic>
@@ -130,14 +137,14 @@ static void ensureDir(const String& path) {
   for (int i = 1; i <= (int)path.length(); i++) {
     if (i == (int)path.length() || path[i] == '/') {
       String d = path.substring(0, i);
-      if (!SD_MMC.exists(d)) SD_MMC.mkdir(d);
+      if (!SDCARD.exists(d)) SDCARD.mkdir(d);
     }
   }
 }
 
 static void updateFree() {
   if (!s_sd) return;
-  uint64_t total = SD_MMC.totalBytes(), used = SD_MMC.usedBytes();
+  uint64_t total = SDCARD.totalBytes(), used = SDCARD.usedBytes();
   s_freeMB = (uint32_t)((total - used) / (1024 * 1024));
 }
 
@@ -164,7 +171,7 @@ static void wavHeader(uint8_t* h, uint32_t dataBytes, uint32_t rate) {
 static bool wavOpen(const String& dir, const String& name, uint32_t rate) {
   ensureDir(dir);
   s_wavPath = dir + "/" + name;
-  s_wav = SD_MMC.open(s_wavPath, FILE_WRITE);
+  s_wav = SDCARD.open(s_wavPath, FILE_WRITE);
   if (!s_wav) { log_w("can't create %s", s_wavPath.c_str()); s_wavPath = ""; return false; }
   uint8_t h[44];
   wavHeader(h, 0, rate);
@@ -207,7 +214,7 @@ static String wavClose(bool keep) {
       path = s_wavPath;
     }
     s_wav.close();
-    if (!keep) SD_MMC.remove(s_wavPath);
+    if (!keep) SDCARD.remove(s_wavPath);
   }
   s_wavPath = "";
   s_recording = false;
@@ -222,8 +229,8 @@ static void logCall(const Call& c) {
   String date = clockSet(c.start) ? dateStr(c.start) : String("undated");
   ensureDir("/logs");
   String path = "/logs/" + date + ".csv";
-  bool fresh = !SD_MMC.exists(path);
-  File f = SD_MMC.open(path, FILE_APPEND);
+  bool fresh = !SDCARD.exists(path);
+  File f = SDCARD.open(path, FILE_APPEND);
   if (!f) return;
   if (fresh) f.print(CSV_HEADER);
   char t[12] = "";
@@ -254,8 +261,8 @@ static int splitCsv(const String& line, String* out, int max) {
 static void loadTodaysLog() {
   time_t now = time(nullptr);
   String path = "/logs/" + dateStr(now) + ".csv";
-  if (!SD_MMC.exists(path)) return;
-  File f = SD_MMC.open(path, FILE_READ);
+  if (!SDCARD.exists(path)) return;
+  File f = SDCARD.open(path, FILE_READ);
   if (!f) return;
   // keep the last RECENT_MAX lines
   String lines[RECENT_MAX];
@@ -313,7 +320,7 @@ static void servicePlay() {
     if (s_play) s_play.close();
     String p;
     { Lock l; p = s_playPath; }
-    s_play = SD_MMC.open(p, FILE_READ);
+    s_play = SDCARD.open(p, FILE_READ);
     uint8_t h[44];
     if (!s_play || s_play.read(h, 44) != 44 || memcmp(h, "RIFF", 4) != 0) { endPlay(); return; }
     s_playRate = h[24] | (h[25] << 8) | (h[26] << 16) | ((uint32_t)h[27] << 24);
@@ -449,6 +456,10 @@ static void processBlock(const int16_t* b, int n, uint32_t rate) {
 }
 
 static bool mountSd() {
+#if defined(BOARD_TAB5)
+  SPI.begin(TAB5_SD_SCK, TAB5_SD_MISO, TAB5_SD_MOSI, TAB5_SD_CS);
+  bool ok = SD.begin(TAB5_SD_CS, SPI, 25000000);
+#else
   SD_MMC.setPins(PIN_SD_CLK, PIN_SD_CMD, PIN_SD_D0, PIN_SD_D1, PIN_SD_D2, PIN_SD_D3);
   bool ok = SD_MMC.begin("/sdcard", false);                 // 4-bit
   if (!ok) {
@@ -456,8 +467,9 @@ static bool mountSd() {
     SD_MMC.setPins(PIN_SD_CLK, PIN_SD_CMD, PIN_SD_D0);
     ok = SD_MMC.begin("/sdcard", true);                     // 1-bit
   }
-  if (!ok || SD_MMC.cardType() == CARD_NONE) { Serial.println("SD card: not found"); return false; }
-  Serial.printf("SD card: %llu MB\n", SD_MMC.cardSize() / (1024 * 1024));
+#endif
+  if (!ok || SDCARD.cardType() == CARD_NONE) { Serial.println("SD card: not found"); return false; }
+  Serial.printf("SD card: %llu MB\n", SDCARD.cardSize() / (1024 * 1024));
   return true;
 }
 

@@ -1,3 +1,4 @@
+#if !defined(BOARD_TAB5)   // FNK0104N only (Tab5 version: board_tab5.cpp)
 // ST77922 QSPI driver.
 // Init table is Freenove's own st77922_lcd_init[] (from their TFT_eSPI fork),
 // as transcribed in github.com/emailman/Freenove_FNK0104N_MicroPython.
@@ -208,3 +209,4 @@ void pushFrame(const uint16_t* pixels) {
 }
 
 }  // namespace St77922
+#endif  // !BOARD_TAB5

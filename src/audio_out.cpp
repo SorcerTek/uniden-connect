@@ -1,3 +1,4 @@
+#if !defined(BOARD_TAB5)   // FNK0104N only (Tab5 version: board_tab5.cpp)
 // ES8311 setup is a trimmed port of Espressif's esp-bsp es8311 driver
 // (Apache-2.0), using its clock coefficient entries for 4.096 MHz MCLK.
 #include "audio_out.h"
@@ -223,3 +224,4 @@ void beep(int hz, int ms) {
 }
 
 }  // namespace AudioOut
+#endif  // !BOARD_TAB5

@@ -1,7 +1,6 @@
 #include "ui.h"
 #include "config.h"
-#include "display_st77922.h"
-#include "touch_st77922.h"
+#include "board.h"
 #include "sds200.h"
 #include "rtsp_audio.h"
 #include "audio_out.h"
@@ -14,8 +13,6 @@
 #include <time.h>
 #include <vector>
 #include <algorithm>
-#define LGFX_USE_V1
-#include <LovyanGFX.hpp>
 
 namespace Ui {
 
@@ -25,11 +22,46 @@ static const int W = 480, H = 320;
 extern const uint8_t kLogoStart[] asm("_binary_data_boot_logo_jpg_start");
 extern const uint8_t kLogoEnd[]   asm("_binary_data_boot_logo_jpg_end");
 extern const uint8_t kAnimStart[] asm("_binary_data_boot_anim_bin_start");
-static LGFX_Sprite s_canvas;
+// The UI is laid out on a logical 480x320 screen. Pen draws it onto the board's
+// canvas, scaling positions and swapping in larger fonts on bigger screens
+// (scale 1 on the FNK0104N; 2.67 x 2.25 on the Tab5's 1280x720).
+struct Pen {
+  LGFX_Sprite* c = nullptr;
+  float kx = 1, ky = 1;
+  int X(int x) const { return (int)lroundf(x * kx); }
+  int Y(int y) const { return (int)lroundf(y * ky); }
+  int R(int r) const { return (int)lroundf(r * (kx < ky ? kx : ky)); }
+  bool scaled() const { return kx != 1 || ky != 1; }
 
-// Mapping from logical (landscape) to physical (portrait) pixels, measured at boot:
-// phys = origin + lx * dx + ly * dy
-static int s_ox, s_oy, s_dxx, s_dxy, s_dyx, s_dyy;
+  const lgfx::IFont* mapFont(const lgfx::IFont* f) const {
+    if (!scaled()) return f;
+    // Pick a smooth font about ky times the original size.
+    if (f == &fonts::Font0) return &fonts::DejaVu24;
+    if (f == &fonts::Font2) return &fonts::DejaVu40;
+    if (f == &fonts::Font4) return &fonts::DejaVu56;
+    if (f == &fonts::FreeSans12pt7b || f == &fonts::FreeSansBold12pt7b) return &fonts::DejaVu56;
+    if (f == &fonts::FreeSansBold18pt7b) return &fonts::DejaVu72;
+    return f;
+  }
+
+  void fillScreen(uint16_t col) { c->fillScreen(col); }
+  void fillRect(int x, int y, int w, int h, uint16_t col) { c->fillRect(X(x), Y(y), X(x + w) - X(x), Y(y + h) - Y(y), col); }
+  void drawRect(int x, int y, int w, int h, uint16_t col) { c->drawRect(X(x), Y(y), X(x + w) - X(x), Y(y + h) - Y(y), col); }
+  void fillRoundRect(int x, int y, int w, int h, int r, uint16_t col) { c->fillRoundRect(X(x), Y(y), X(x + w) - X(x), Y(y + h) - Y(y), R(r), col); }
+  void drawRoundRect(int x, int y, int w, int h, int r, uint16_t col) { c->drawRoundRect(X(x), Y(y), X(x + w) - X(x), Y(y + h) - Y(y), R(r), col); }
+  void drawFastHLine(int x, int y, int w, uint16_t col) { c->fillRect(X(x), Y(y), X(x + w) - X(x), Y(y + 1) - Y(y), col); }
+  void fillCircle(int x, int y, int r, uint16_t col) { c->fillCircle(X(x), Y(y), R(r), col); }
+  void fillTriangle(int x0, int y0, int x1, int y1, int x2, int y2, uint16_t col) { c->fillTriangle(X(x0), Y(y0), X(x1), Y(y1), X(x2), Y(y2), col); }
+  void setFont(const lgfx::IFont* f) { c->setFont(mapFont(f)); }
+  void setTextColor(uint16_t col) { c->setTextColor(col); }
+  void setTextDatum(lgfx::textdatum_t d) { c->setTextDatum(d); }
+  void drawString(const char* t, int x, int y) { c->drawString(t, X(x), Y(y)); }
+  int textWidth(const char* t) { return (int)ceilf(c->textWidth(t) / kx); }
+  bool drawJpg(const uint8_t* d, uint32_t len, int x, int y) {
+    return c->drawJpg(d, len, X(x), Y(y), 0, 0, 0, 0, kx, ky);
+  }
+};
+static Pen s_canvas;
 
 // ---------- colours ----------
 static const uint16_t C_BG = 0x0000;
@@ -52,7 +84,7 @@ static Page s_pageBeforePower = PAGE_MAIN;
 
 enum Action {
   A_NONE, A_KEY, A_SPK_DN, A_SPK_UP, A_SPK_MUTE, A_GOTO,
-  A_AUDIO_RECONNECT, A_REBOOT, A_WX, A_SCAN, A_POWER_OFF, A_RESTART, A_POWER_CANCEL,
+  A_AUDIO_RECONNECT, A_REBOOT, A_WX, A_SCAN, A_POWER_OFF, A_RESTART, A_POWER_CANCEL, A_POWER_MENU, A_LAUNCHER,
   A_REC, A_KEYLIGHT, A_RECENT_ROW, A_LIST_UP, A_LIST_DN, A_STOP_PLAY, A_FAV, A_ADJ,
   A_SETUP_FIELD, A_WIFI_PICK, A_WIFI_OTHER, A_WIFI_RESCAN, A_SAVE_CONNECT, A_FORGET_WIFI,
   A_KB_CHAR, A_KB_SHIFT, A_KB_MODE, A_KB_BKSP, A_KB_SHOW, A_KB_OK, A_KB_CANCEL
@@ -123,7 +155,7 @@ static void activity() { s_lastActivity = millis(); }
 static void applyBrightness() {
   const auto& cfg = Settings::get();
   int want = s_dimmed ? cfg.dimLevel : cfg.brightness;
-  if (want != s_appliedBrightness) { s_appliedBrightness = want; St77922::setBrightness(want); }
+  if (want != s_appliedBrightness) { s_appliedBrightness = want; Board::setBrightness(want); }
 }
 
 // ---------- weather alert ----------
@@ -415,17 +447,27 @@ static void pageKeys() {
   add(KX(0), KYR(4), KW, KH, rec ? "REC ON" : "REC OFF", A_REC, 0, rec, rec ? C_DARKRED : C_BTN);
   add(KX(1), KYR(4), KW, KH, "RECENT", A_GOTO, PAGE_RECENT);
   add(KX(2), KYR(4), KW, KH, "FAVS", A_GOTO, PAGE_FAVS);
-  add(KX(3), KYR(4), 2 * KW + KG + 1, KH, "SETTINGS", A_GOTO, PAGE_SETTINGS);
+  add(KX(3), KYR(4), KW, KH, "SETTINGS", A_GOTO, PAGE_SETTINGS);
+  add(KX(4), KYR(4), KW, KH, "POWER", A_POWER_MENU);
   add(KX(5), KYR(4), KW, KH, "BACK", A_GOTO, PAGE_MAIN);
 }
 
 // ---------- POWER ----------
 static void pagePower() {
   centerText("Power", W / 2, 50, &fonts::FreeSansBold18pt7b, C_TEXT);
-  centerText("After POWER OFF, press BOOT to turn it back on", W / 2, 85, &fonts::Font2, C_DIM);
-  add(16, 120, 144, 120, "POWER OFF", A_POWER_OFF, 0, false, C_BAD);
-  add(168, 120, 144, 120, "RESTART", A_RESTART);
-  add(320, 120, 144, 120, "CANCEL", A_POWER_CANCEL);
+  centerText(Board::hasBootButton() ? "After POWER OFF, press BOOT to turn it back on"
+                                    : "After POWER OFF, press the power button to turn it back on",
+             W / 2, 85, &fonts::Font2, C_DIM);
+  if (Board::hasLauncher()) {
+    add(8, 120, 110, 120, "POWER OFF", A_POWER_OFF, 0, false, C_BAD);
+    add(126, 120, 110, 120, "RESTART", A_RESTART);
+    add(244, 120, 110, 120, "LAUNCHER", A_LAUNCHER);
+    add(362, 120, 110, 120, "CANCEL", A_POWER_CANCEL);
+  } else {
+    add(16, 120, 144, 120, "POWER OFF", A_POWER_OFF, 0, false, C_BAD);
+    add(168, 120, 144, 120, "RESTART", A_RESTART);
+    add(320, 120, 144, 120, "CANCEL", A_POWER_CANCEL);
+  }
 }
 
 // ---------- SETTINGS ----------
@@ -465,7 +507,8 @@ static void pageSettings() {
                                               : String("Wi-Fi: not connected");
   fitText(wifi + "   Scanner: " + Settings::scannerIp(), 12, y, 456, &fonts::Font0, C_DIM); y += 12;
   String sd = Calls::sdInfo() + (Calls::sdOk() ? (Settings::get().record ? ", recording on" : ", recording off") : String(""));
-  fitText(sd + "   Updates: " + (Ota::enabled() ? String(OTA_HOSTNAME) + ".local" : String("off")), 12, y, 456, &fonts::Font0, C_DIM);
+  String upd = Board::hasLauncher() ? String("via Launcher") : Ota::enabled() ? String(OTA_HOSTNAME) + ".local" : String("off");
+  fitText(sd + "   Updates: " + upd, 12, y, 456, &fonts::Font0, C_DIM);
 
   add(2, 262, 116, 54, "WI-FI SETUP", A_GOTO, PAGE_SETUP);
   add(122, 262, 138, 54, "RECONNECT AUDIO", A_AUDIO_RECONNECT);
@@ -702,7 +745,7 @@ static void redraw() {
     s_canvas.fillRoundRect(60, 150, 360, 40, 8, C_BTN_DOWN);
     centerText(s_toast, 240, 170, &fonts::Font4, C_TEXT);
   }
-  St77922::pushFrame((const uint16_t*)s_canvas.getBuffer());
+  Board::present();
 }
 
 // ---------- actions ----------
@@ -779,6 +822,14 @@ static void doAction(const Button& b, bool longPress) {
       break;
     case A_GOTO: goPage((Page)b.arg); break;
     case A_POWER_CANCEL: s_page = s_pageBeforePower; break;
+    case A_POWER_MENU: s_pageBeforePower = s_page; s_page = PAGE_POWER; break;
+    case A_LAUNCHER:
+      showLogo("Returning to Launcher...");
+      Calls::closeAll();
+      Settings::saveNow();
+      RtspAudio::shutdown();
+      Board::exitToLauncher();
+      break;
     case A_POWER_OFF:
       showLogo("Powering off - press BOOT to turn on");
       Calls::closeAll();
@@ -894,16 +945,6 @@ static void doAction(const Button& b, bool longPress) {
 }
 
 // ---------- touch ----------
-// Convert a physical (portrait) touch point to logical landscape coordinates.
-static bool physToLogical(int px, int py, int& lx, int& ly) {
-  int rx = px - s_ox, ry = py - s_oy;
-  int det = s_dxx * s_dyy - s_dyx * s_dxy;
-  if (det == 0) return false;
-  lx = (rx * s_dyy - ry * s_dyx) / det;
-  ly = (ry * s_dxx - rx * s_dxy) / det;
-  return lx >= 0 && lx < W && ly >= 0 && ly < H;
-}
-
 static int hitTest(int x, int y) {
   for (size_t i = 0; i < s_btns.size(); i++) {
     const Button& b = s_btns[i];
@@ -913,14 +954,12 @@ static int hitTest(int x, int y) {
 }
 
 static void handleTouch() {
-  int16_t px, py;
-  bool down = Touch::read(px, py);
-  int lx = -1, ly = -1;
-  if (down) {
-    if (!physToLogical(px, py, lx, ly)) down = false;
-#if TOUCH_DEBUG
-    Serial.printf("touch raw=(%d,%d) screen=(%d,%d)\n", px, py, lx, ly);
-#endif
+  int sx, sy, lx = -1, ly = -1;
+  bool down = Board::touch(sx, sy);
+  if (down) {                                    // canvas pixels -> logical 480x320
+    lx = (int)(sx / s_canvas.kx);
+    ly = (int)(sy / s_canvas.ky);
+    if (lx < 0 || lx >= W || ly < 0 || ly >= H) down = false;
   }
 
   // A touch on a dimmed screen (or on the weather alert) is used up by waking / dismissing.
@@ -962,36 +1001,12 @@ static void handleTouch() {
 }
 
 // ---------- setup ----------
-static void measureRotation() {
-  // Draw marker pixels at known logical points and find where they land in the
-  // portrait buffer. This gives us the exact touch mapping for any rotation.
-  auto find = [](uint16_t color, int& x, int& y) {
-    const uint16_t* buf = (const uint16_t*)s_canvas.getBuffer();
-    uint16_t c = (color >> 8) | (color << 8);   // buffer stores byte-swapped RGB565
-    for (int i = 0; i < LCD_NATIVE_W * LCD_NATIVE_H; i++)
-      if (buf[i] == c || buf[i] == color) { x = i % LCD_NATIVE_W; y = i / LCD_NATIVE_W; return; }
-    x = y = 0;
-  };
-  s_canvas.fillScreen(0);
-  s_canvas.drawPixel(0, 0, 0x1234);
-  s_canvas.drawPixel(1, 0, 0x2345);
-  s_canvas.drawPixel(0, 1, 0x3456);
-  int ax, ay, bx, by, cx, cy;
-  find(0x1234, ax, ay);
-  find(0x2345, bx, by);
-  find(0x3456, cx, cy);
-  s_ox = ax; s_oy = ay;
-  s_dxx = bx - ax; s_dxy = by - ay;
-  s_dyx = cx - ax; s_dyy = cy - ay;
-  log_i("rotation map: origin(%d,%d) dx(%d,%d) dy(%d,%d)", s_ox, s_oy, s_dxx, s_dxy, s_dyx, s_dyy);
-}
-
 bool begin() {
-  s_canvas.setPsram(true);
-  s_canvas.setColorDepth(16);
-  if (!s_canvas.createSprite(LCD_NATIVE_W, LCD_NATIVE_H)) return false;
-  s_canvas.setRotation(SCREEN_ROTATION);
-  measureRotation();
+  if (!Board::beginDisplay()) return false;
+  LGFX_Sprite& c = Board::canvas();
+  s_canvas.c = &c;
+  s_canvas.kx = c.width() / (float)W;
+  s_canvas.ky = c.height() / (float)H;
   initGlows();
   s_lastActivity = millis();
   return true;
@@ -1017,7 +1032,7 @@ void showLogo(const char* status) {
   s_canvas.fillScreen(C_BG);
   s_canvas.drawJpg(kLogoStart, kLogoEnd - kLogoStart, 0, 0);
   drawBootStatus(status);
-  St77922::pushFrame((const uint16_t*)s_canvas.getBuffer());
+  Board::present();
 }
 
 // boot_anim.bin: "UCA1", u16 frames, u16 ms/frame, then {u32 offset, u32 length} per frame, then JPEGs.
@@ -1035,7 +1050,7 @@ void bootAnimFrame(const char* status) {
   drawBootStatus(status);
   int32_t wait = (int32_t)(nextAt - millis());
   if (wait > 0 && wait <= ms) delay(wait);
-  St77922::pushFrame((const uint16_t*)s_canvas.getBuffer());
+  Board::present();
   nextAt = millis() + ms;
   frame = (frame + 1) % count;
 }
@@ -1053,7 +1068,7 @@ void showMessage(const char* line1, const char* line2) {
   s_canvas.setTextColor(C_DIM);
   if (line2) s_canvas.drawString(line2, W / 2, 205);
   s_canvas.setTextDatum(textdatum_t::top_left);
-  St77922::pushFrame((const uint16_t*)s_canvas.getBuffer());
+  Board::present();
 }
 
 // Serial debug helper: "S" sends a screenshot (raw RGB565 of the 320x480 frame buffer),
@@ -1062,9 +1077,16 @@ static void serialDebug() {
   if (!Serial.available()) return;
   int c = Serial.read();
   if (c == 'S') {
-    Serial.write((const uint8_t*)"SHOT", 4);
-    const uint8_t* p = (const uint8_t*)s_canvas.getBuffer();
-    size_t left = LCD_NATIVE_W * LCD_NATIVE_H * 2;
+    LGFX_Sprite& raw = Board::canvas();
+    const uint8_t* p = (const uint8_t*)raw.getBuffer();
+    size_t left = raw.bufferLength();
+    if (s_canvas.scaled()) {                     // "SHT2", width, height (u16 LE), then pixels
+      uint16_t wh[2] = {(uint16_t)raw.width(), (uint16_t)raw.height()};
+      Serial.write((const uint8_t*)"SHT2", 4);
+      Serial.write((const uint8_t*)wh, 4);
+    } else {
+      Serial.write((const uint8_t*)"SHOT", 4);   // 320x480 panel-order frame
+    }
     while (left) {
       size_t n = Serial.write(p, min<size_t>(left, 512));
       p += n; left -= n;

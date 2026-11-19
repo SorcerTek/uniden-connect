@@ -14,8 +14,10 @@
 #include <time.h>
 #include "config.h"
 #include "settings.h"
-#include "display_st77922.h"
+#include "board.h"
+#if !defined(BOARD_TAB5)
 #include "touch_st77922.h"
+#endif
 #include "audio_out.h"
 #include "rtsp_audio.h"
 #include "sds200.h"
@@ -26,6 +28,12 @@
 #include "ota.h"
 
 void setup() {
+#if defined(BOARD_TAB5)
+  auto cfg = M5.config();
+  cfg.internal_spk = true;
+  cfg.internal_mic = false;
+  M5.begin(cfg);                     // display, touch, speaker, power, Wi-Fi (ESP32-C6) pins
+#endif
   Power::begin();                    // release pins held during power-off sleep
   Serial.begin(115200);
   delay(200);
@@ -34,13 +42,14 @@ void setup() {
   if (!psramFound()) Serial.println("WARNING: PSRAM not found - check platformio.ini memory settings");
   Settings::begin();
 
-  if (!St77922::begin()) Serial.println("Display init failed");
-  St77922::setBrightness(Settings::get().brightness);
-  if (!Ui::begin()) Serial.println("UI init failed (not enough memory?)");
+  if (!Ui::begin()) Serial.println("Display / UI init failed");
+  Board::setBrightness(Settings::get().brightness);
   Ui::showLogo("Starting...");
 
+#if !defined(BOARD_TAB5)
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);
   if (!Touch::begin()) Serial.println("Touch controller not found");
+#endif
   if (!AudioOut::begin()) Serial.println("Audio init failed");
   AudioOut::setVolume(Settings::get().spkVolume);
   AudioOut::setMuted(Settings::get().muted);

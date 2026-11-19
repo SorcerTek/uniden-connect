@@ -1,3 +1,4 @@
+#if !defined(BOARD_TAB5)   // FNK0104N only (Tab5 version: board_tab5.cpp)
 #include "power.h"
 #include "config.h"
 #include "display_st77922.h"
@@ -90,3 +91,4 @@ void off() {
 }
 
 }  // namespace Power
+#endif  // !BOARD_TAB5
