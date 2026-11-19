@@ -16,6 +16,7 @@ const char* name();
 bool beginDisplay();            // panel, backlight and the full-screen canvas
 LGFX_Sprite& canvas();          // landscape canvas the UI draws into
 void present();                 // send the canvas to the screen
+void presentRect(int x, int y, int w, int h);   // send just this part of the canvas (canvas pixels)
 int frameWidth();               // canvas buffer layout (for screenshots): width, height in
 int frameHeight();              //   buffer order, and whether pixels are little-endian RGB565
 bool frameLittleEndian();
@@ -27,6 +28,7 @@ const void* frameData();        // what is on screen now (for screenshots)
 int bands();
 LGFX_Sprite& band(int k, int& xOffset);   // cleared band k; xOffset = its left edge in canvas pixels
 void presentBand(int k);
+void bandsDone();                        // wait until the last band is on screen
 void setBrightness(int pct);    // 0-100
 bool touch(int& x, int& y);     // finger position in canvas pixels; false if not touched
 bool orientationChanged();      // the screen was turned (Tab5 auto-rotate): redraw everything

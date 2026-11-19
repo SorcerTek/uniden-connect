@@ -28,9 +28,9 @@ extern const uint8_t kAnimStart[] asm("_binary_data_boot_anim_bin_start");
 struct Pen {
   LGFX_Sprite* c = nullptr;
   float kx = 1, ky = 1;
-  int ox = 0;                                    // left edge of the band being drawn (canvas pixels)
+  int ox = 0, oy = 0;                            // origin of the band / image being drawn (canvas pixels)
   int X(int x) const { return (int)lroundf(x * kx) - ox; }
-  int Y(int y) const { return (int)lroundf(y * ky); }
+  int Y(int y) const { return (int)lroundf(y * ky) - oy; }
   int R(int r) const { return (int)lroundf(r * (kx < ky ? kx : ky)); }
   bool scaled() const { return kx != 1 || ky != 1; }
 
@@ -45,18 +45,39 @@ struct Pen {
     return f;
   }
 
+  // When drawing in bands, skip anything that lies entirely outside the current band.
+  // Skip anything outside the band / image being drawn or outside the clip region.
+  bool clipping = false;
+  int cx0 = 0, cy0 = 0, cx1 = 0, cy1 = 0;        // clip region (canvas pixels)
+  bool off(int x0, int x1, int y0 = -100000, int y1 = 100000) const {
+    if (clipping) return X(x1) <= cx0 || X(x0) >= cx1 || (y0 > -100000 && (Y(y1) <= cy0 || Y(y0) >= cy1));
+    return ox && (X(x1) <= 0 || X(x0) >= c->width());
+  }
   void fillScreen(uint16_t col) { c->fillScreen(col); }
-  void fillRect(int x, int y, int w, int h, uint16_t col) { c->fillRect(X(x), Y(y), X(x + w) - X(x), Y(y + h) - Y(y), col); }
-  void drawRect(int x, int y, int w, int h, uint16_t col) { c->drawRect(X(x), Y(y), X(x + w) - X(x), Y(y + h) - Y(y), col); }
-  void fillRoundRect(int x, int y, int w, int h, int r, uint16_t col) { c->fillRoundRect(X(x), Y(y), X(x + w) - X(x), Y(y + h) - Y(y), R(r), col); }
-  void drawRoundRect(int x, int y, int w, int h, int r, uint16_t col) { c->drawRoundRect(X(x), Y(y), X(x + w) - X(x), Y(y + h) - Y(y), R(r), col); }
-  void drawFastHLine(int x, int y, int w, uint16_t col) { c->fillRect(X(x), Y(y), X(x + w) - X(x), Y(y + 1) - Y(y), col); }
-  void fillCircle(int x, int y, int r, uint16_t col) { c->fillCircle(X(x), Y(y), R(r), col); }
-  void fillTriangle(int x0, int y0, int x1, int y1, int x2, int y2, uint16_t col) { c->fillTriangle(X(x0), Y(y0), X(x1), Y(y1), X(x2), Y(y2), col); }
+  void fillRect(int x, int y, int w, int h, uint16_t col) { if (off(x, x + w, y, y + h)) return; c->fillRect(X(x), Y(y), X(x + w) - X(x), Y(y + h) - Y(y), col); }
+  void drawRect(int x, int y, int w, int h, uint16_t col) { if (off(x, x + w, y, y + h)) return; c->drawRect(X(x), Y(y), X(x + w) - X(x), Y(y + h) - Y(y), col); }
+  void fillRoundRect(int x, int y, int w, int h, int r, uint16_t col) { if (off(x, x + w, y, y + h)) return; c->fillRoundRect(X(x), Y(y), X(x + w) - X(x), Y(y + h) - Y(y), R(r), col); }
+  void drawRoundRect(int x, int y, int w, int h, int r, uint16_t col) { if (off(x, x + w, y, y + h)) return; c->drawRoundRect(X(x), Y(y), X(x + w) - X(x), Y(y + h) - Y(y), R(r), col); }
+  void drawFastHLine(int x, int y, int w, uint16_t col) { if (off(x, x + w, y, y + 1)) return; c->fillRect(X(x), Y(y), X(x + w) - X(x), Y(y + 1) - Y(y), col); }
+  void fillCircle(int x, int y, int r, uint16_t col) { if (off(x - r, x + r, y - r, y + r)) return; c->fillCircle(X(x), Y(y), R(r), col); }
+  void fillTriangle(int x0, int y0, int x1, int y1, int x2, int y2, uint16_t col) {
+    if (off(min(x0, min(x1, x2)), max(x0, max(x1, x2)), min(y0, min(y1, y2)), max(y0, max(y1, y2)))) return;
+    c->fillTriangle(X(x0), Y(y0), X(x1), Y(y1), X(x2), Y(y2), col);
+  }
   void setFont(const lgfx::IFont* f) { c->setFont(mapFont(f)); }
   void setTextColor(uint16_t col) { c->setTextColor(col); }
   void setTextDatum(lgfx::textdatum_t d) { c->setTextDatum(d); }
-  void drawString(const char* t, int x, int y) { c->drawString(t, X(x), Y(y)); }
+  void drawString(const char* t, int x, int y) {
+    if (ox || clipping) {                        // skip text that misses this band / region
+      int w = c->textWidth(t), px = X(x), py = Y(y), fh = c->fontHeight();
+      int d = c->getTextDatum() & 3;             // 0 left, 1 centre, 2 right
+      int x0 = d == 0 ? px : d == 1 ? px - w / 2 : px - w;
+      int lx0 = clipping ? cx0 : 0, lx1 = clipping ? cx1 : c->width();
+      if (x0 + w <= lx0 || x0 >= lx1) return;
+      if (clipping && (py + fh <= cy0 || py - fh >= cy1)) return;
+    }
+    c->drawString(t, X(x), Y(y));
+  }
   int textWidth(const char* t) { return (int)ceilf(c->textWidth(t) / kx); }
   bool drawJpg(const uint8_t* d, uint32_t len, int x, int y) {
     return c->drawJpg(d, len, X(x), Y(y), 0, 0, 0, 0, kx, ky);
@@ -184,14 +205,22 @@ static String s_kbText;
 static bool s_kbShow = false;
 
 // ---------- drawing helpers ----------
+// Shortened text is remembered for one redraw, so drawing in bands doesn't redo the
+// (slow) width measuring for every band.
+struct FitCache { String in; int maxW; const lgfx::IFont* font; String out; };
+static std::vector<FitCache> s_fitCache;
+
 static void fitText(const String& txt, int x, int y, int maxW, const lgfx::IFont* font, uint16_t color) {
   s_canvas.setFont(font);
   s_canvas.setTextColor(color);
+  for (auto& f : s_fitCache)
+    if (f.maxW == maxW && f.font == font && f.in == txt) { s_canvas.drawString(f.out.c_str(), x, y); return; }
   String t = txt;
   if (s_canvas.textWidth(t.c_str()) > maxW) {
     while (t.length() > 1 && s_canvas.textWidth((t + "...").c_str()) > maxW) t.remove(t.length() - 1);
     t += "...";
   }
+  s_fitCache.push_back({txt, maxW, font, t});
   s_canvas.drawString(t.c_str(), x, y);
 }
 
@@ -207,7 +236,47 @@ static void centerText(const String& t, int x, int y, const lgfx::IFont* font, u
 // a faint light leak around the edge. Pressed = pushed in and lit up. Active = LED bar.
 static const uint16_t K_RIM = 0x0841, K_BODY = 0x2104, K_TOP = 0x2945, K_HI = 0x4208, K_SH = 0x0000;
 
+static void drawButtonNow(const Button& b, bool down);
+
+// On big screens a backlit key is slow to draw (its label is drawn five times with
+// smooth fonts), so each key's look is kept as a small image and reused until its
+// label, state or colour changes.
+struct KeyImage { String key; LGFX_Sprite* img; };
+static std::vector<KeyImage> s_keyCache;
+
 static void drawButton(const Button& b, bool down) {
+  bool custom = b.action == A_RECENT_ROW || b.action == A_WIFI_PICK || b.action == A_FAV || b.action == A_SETUP_FIELD;
+  if (!s_canvas.scaled() || s_canvas.ox || s_canvas.oy) { drawButtonNow(b, down); return; }
+  bool armed = b.action == A_REBOOT && rebootArmed();
+  String key = String(b.x) + "," + b.y + "," + b.w + "," + b.h + "|" + b.label + "|" + (int)down + (int)b.hl + (int)armed +
+               "|" + b.bg + "|" + (int)b.glow + "|" + Settings::keyColor() + (custom ? "|c" : "");
+  LGFX_Sprite* img = nullptr;
+  for (auto& k : s_keyCache) if (k.key == key) { img = k.img; break; }
+  int px = s_canvas.X(b.x), py = s_canvas.Y(b.y);
+  if (!img) {
+    if (s_keyCache.size() >= 96) {               // keep memory bounded
+      for (auto& k : s_keyCache) delete k.img;
+      s_keyCache.clear();
+    }
+    int w = s_canvas.X(b.x + b.w) - px, h = s_canvas.Y(b.y + b.h) - py;
+    img = new LGFX_Sprite(s_canvas.c);
+    img->setPsram(true);
+    img->setColorDepth(s_canvas.c->getColorDepth());
+    if (!img->createSprite(w, h)) { delete img; drawButtonNow(b, down); return; }
+    img->fillScreen(C_BG);
+    LGFX_Sprite* main = s_canvas.c;
+    s_canvas.c = img;
+    s_canvas.ox = px;
+    s_canvas.oy = py;
+    drawButtonNow(b, down);
+    s_canvas.c = main;
+    s_canvas.ox = s_canvas.oy = 0;
+    s_keyCache.push_back({key, img});
+  }
+  img->pushSprite(s_canvas.c, px, py);
+}
+
+static void drawButtonNow(const Button& b, bool down) {
   bool armed = b.action == A_REBOOT && rebootArmed();
   int gi = b.glow >= 0 ? b.glow
          : (armed || b.bg == C_BAD || b.bg == C_DARKRED) ? KL_RED
@@ -748,7 +817,66 @@ static void drawPage() {
   }
 }
 
+// ---- region updates (big screens) ----
+// The main page is split into regions. Each has a fingerprint of everything it shows;
+// only regions whose fingerprint changed are cleared, redrawn (clipped) and sent to
+// the screen. Anything else (other pages, pop-ups) redraws the whole screen.
+struct Region { int x, y, w, h; };
+static const Region kMainRegions[3] = {{0, 0, 480, 24}, {0, 24, 480, 238}, {0, 262, 480, 58}};
+static String s_regionSig[3];
+static bool s_regionsValid = false;
+
+static String sigStatus() {
+  const auto& st = Sds200::status();
+  char clk[16] = "";
+  clockText(clk, sizeof(clk));
+  return String(st.online) + clk + st.model + RtspAudio::connected() + AudioOut::playing() + Calls::replaying() +
+         AudioOut::muted() + RtspAudio::status() + Calls::recordingNow() + AudioOut::volume() + "|" +
+         Battery::percent() + "|" + st.sig;
+}
+static String sigInfo() {
+  const auto& st = Sds200::status();
+  String w = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("-");
+  return String(st.online) + "|" + st.system + "|" + st.mode + "|" + st.department + "|" + st.channel + "|" + (st.sig > 0) +
+         st.sysHold + st.deptHold + st.chanHold + "|" + st.tgid + "|" + st.freq + "|" + st.mod + "|" + st.service + "|" +
+         st.site + "|" + st.rssi + "|" + st.info1 + "|" + st.info2 + "|" + st.popup + "|" + w + "|" + Settings::scannerIp() +
+         RtspAudio::lockedOut() + rebootArmed() + Sds200::inWeather() + "|" + s_pressed + "|" + Settings::keyColor();
+}
+static String sigButtons() { return String(AudioOut::muted()) + "|" + s_pressed + "|" + Settings::keyColor(); }
+
+static bool overlayShowing() { return alertShowing() || (s_toast.length() && millis() < s_toastUntil); }
+
+static bool redrawRegions() {
+  static bool overlayWas = false;
+  bool overlay = overlayShowing();
+  bool can = s_canvas.scaled() && Board::bands() == 0 && s_page == PAGE_MAIN && !overlay && !overlayWas;
+  overlayWas = overlay;
+  if (!can) { s_regionsValid = false; return false; }
+  String sig[3] = {sigStatus(), sigInfo(), sigButtons()};
+  if (!s_regionsValid) {                          // first time on this page: full redraw, then regions
+    for (int r = 0; r < 3; r++) s_regionSig[r] = sig[r];
+    s_regionsValid = true;
+    return false;
+  }
+  for (int r = 0; r < 3; r++) {
+    if (sig[r] == s_regionSig[r]) continue;
+    s_regionSig[r] = sig[r];
+    const Region& g = kMainRegions[r];
+    int x0 = s_canvas.X(g.x), y0 = s_canvas.Y(g.y), x1 = s_canvas.X(g.x + g.w), y1 = s_canvas.Y(g.y + g.h);
+    s_canvas.c->setClipRect(x0, y0, x1 - x0, y1 - y0);
+    s_canvas.clipping = true;
+    s_canvas.cx0 = x0; s_canvas.cy0 = y0; s_canvas.cx1 = x1; s_canvas.cy1 = y1;
+    drawPage();
+    s_canvas.clipping = false;
+    s_canvas.c->clearClipRect();
+    Board::presentRect(x0, y0, x1 - x0, y1 - y0);
+  }
+  return true;
+}
+
 static void redraw() {
+  s_fitCache.clear();
+  if (redrawRegions()) return;
   int nb = Board::bands();
   if (nb == 0) {                                  // whole canvas at once
     drawPage();
@@ -762,6 +890,7 @@ static void redraw() {
     drawPage();
     Board::presentBand(k);
   }
+  Board::bandsDone();
   s_canvas.c = &Board::canvas();
   s_canvas.ox = 0;
 }

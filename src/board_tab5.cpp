@@ -14,6 +14,8 @@
 #include <esp_heap_caps.h>
 #include <esp_cache.h>
 #include <rom/ets_sys.h>
+#include <esp_async_memcpy.h>
+#include <freertos/semphr.h>
 #include <lgfx/v1/platforms/esp32p4/Panel_DSI.hpp>
 #include <atomic>
 
@@ -27,6 +29,7 @@ static uint16_t* s_fb = nullptr;          // the panel's frame buffer (native po
 static size_t s_fbLen = 0;
 static int s_nativeW = 0, s_nativeH = 0;
 static int s_row0 = 0, s_rowStep = 1;   // canvas x -> frame-buffer row: row0 + x * rowStep
+static int s_col0 = 0, s_colStep = 1;   // canvas y -> frame-buffer column: col0 + y * colStep
 static void setupBands(int rotation);
 
 // Write to the frame buffer in small pieces with a short gap after each, so the display
@@ -113,7 +116,11 @@ bool beginDisplay() {
   if (fast) {
     s_row0 = want[0] / s_nativeW;               // frame-buffer row of canvas x = 0
     s_rowStep = (want[1] - want[0]) / s_nativeW >= 0 ? 1 : -1;
+    s_col0 = want[0] % s_nativeW;               // frame-buffer column of canvas y = 0
+    s_colStep = (want[2] - want[0]) >= 0 ? 1 : -1;
+#if TAB5_BANDED
     setupBands(s_canvas->getRotation());
+#endif
   }
   s_canvas->fillScreen(TFT_BLACK);
   log_w("Tab5 display %dx%d, canvas rotation %d, %s updates", s_canvas->width(), s_canvas->height(),
@@ -131,33 +138,63 @@ static M5Canvas* s_band = nullptr;
 static int s_bandRows = 0, s_nBands = 0;
 static uint32_t* s_bandHash = nullptr;
 
+// Two band buffers in internal RAM: while the DMA engine copies one to the screen,
+// the next band is drawn into the other.
+static uint8_t* s_bandBuf[2] = {nullptr, nullptr};
+static SemaphoreHandle_t s_bandDone[2] = {nullptr, nullptr};
+static bool s_bandBusy[2] = {false, false};
+static async_memcpy_handle_t s_dma = nullptr;
+static int s_bandRot = 0;
+
+static bool IRAM_ATTR dmaDone(async_memcpy_handle_t, async_memcpy_event_t*, void* arg) {
+  BaseType_t woke = pdFALSE;
+  xSemaphoreGiveFromISR((SemaphoreHandle_t)arg, &woke);
+  return woke == pdTRUE;
+}
+
 static void setupBands(int rotation) {
   if (!s_fb) return;
-  for (int rows : {80, 64, 40, 32}) {         // biggest band that fits in internal RAM
+  for (int rows : {40, 32, 20}) {             // bands that fit twice in internal RAM, leaving room for Wi-Fi
     if (s_nativeH % rows) continue;
-    s_band = new M5Canvas(&M5.Display);
-    s_band->setPsram(false);
-    s_band->setColorDepth(s_canvas->getColorDepth());
-    if (s_band->createSprite(s_nativeW, rows)) { s_bandRows = rows; break; }
-    delete s_band;
-    s_band = nullptr;
+    size_t len = (size_t)s_nativeW * rows * 2;
+    s_bandBuf[0] = (uint8_t*)heap_caps_aligned_alloc(64, len, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    s_bandBuf[1] = (uint8_t*)heap_caps_aligned_alloc(64, len, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    if (s_bandBuf[0] && s_bandBuf[1]) { s_bandRows = rows; break; }
+    heap_caps_free(s_bandBuf[0]); heap_caps_free(s_bandBuf[1]);
+    s_bandBuf[0] = s_bandBuf[1] = nullptr;
   }
-  if (!s_band) { log_w("Tab5: no internal RAM for banded drawing"); return; }
-  s_band->setRotation(rotation);
+  if (!s_bandRows) { log_w("Tab5: no internal RAM for banded drawing"); return; }
+  s_band = new M5Canvas(&M5.Display);
+  s_bandRot = rotation;
   s_nBands = s_nativeH / s_bandRows;
   s_bandHash = (uint32_t*)heap_caps_calloc(s_nBands, sizeof(uint32_t), MALLOC_CAP_INTERNAL);
   for (int k = 0; k < s_nBands; k++) s_bandHash[k] = ~0u;
-  log_w("Tab5: banded drawing, %d bands of %d rows", s_nBands, s_bandRows);
+  for (int i = 0; i < 2; i++) { s_bandDone[i] = xSemaphoreCreateBinary(); }
+  async_memcpy_config_t cfg = ASYNC_MEMCPY_DEFAULT_CONFIG();
+  cfg.backlog = 4;
+  cfg.dma_burst_size = TAB5_DMA_BURST;
+  if (esp_async_memcpy_install_gdma_axi(&cfg, &s_dma) != ESP_OK) { s_dma = nullptr; log_w("Tab5: no DMA copy, using CPU"); }
+  log_w("Tab5: banded drawing, %d bands of %d rows, %s copies", s_nBands, s_bandRows, s_dma ? "DMA" : "CPU");
+}
+
+static void waitBand(int i) {
+  if (s_bandBusy[i]) { xSemaphoreTake(s_bandDone[i], pdMS_TO_TICKS(200)); s_bandBusy[i] = false; }
 }
 
 int bands() { return s_nBands; }
 
 LGFX_Sprite& band(int k, int& xOffset) {
+  int i = k & 1;
+  waitBand(i);                                // its previous copy must be finished
+  s_band->setBuffer(s_bandBuf[i], s_nativeW, s_bandRows, s_canvas->getColorDepth());
+  s_band->setRotation(s_bandRot);
   int r0 = k * s_bandRows;                    // first frame-buffer row of this band
   xOffset = s_rowStep > 0 ? r0 - s_row0 : s_row0 - r0 - s_bandRows + 1;
   s_band->fillScreen(TFT_BLACK);
   return *s_band;
 }
+
+void bandsDone() { waitBand(0); waitBand(1); }
 
 static uint32_t hashBuf(const uint32_t* p, size_t words) {
   uint32_t h = 2166136261u;
@@ -166,12 +203,17 @@ static uint32_t hashBuf(const uint32_t* p, size_t words) {
 }
 
 void presentBand(int k) {
+  int i = k & 1;
   size_t len = (size_t)s_nativeW * s_bandRows * 2;
-  auto* src = (const uint32_t*)s_band->getBuffer();
+  auto* src = (const uint32_t*)s_bandBuf[i];
   uint32_t h = hashBuf(src, len / 4);
   if (h == s_bandHash[k]) return;             // unchanged: leave the screen alone
   s_bandHash[k] = h;
   auto* dst = (uint8_t*)s_fb + (size_t)k * len;
+  if (s_dma) {
+    esp_cache_msync(s_bandBuf[i], len, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    if (esp_async_memcpy(s_dma, dst, s_bandBuf[i], len, dmaDone, s_bandDone[i]) == ESP_OK) { s_bandBusy[i] = true; return; }
+  }
   copyGently(dst, (const uint8_t*)src, len);
 }
 
@@ -216,6 +258,26 @@ void present() {
     s_canvas->pushSprite(0, 0);
   }
 }
+// Copy one rectangle of the canvas (canvas pixels) to the screen.
+void presentRect(int x, int y, int w, int h) {
+  if (!s_fb) { present(); return; }
+  int rA = s_row0 + x * s_rowStep, rB = s_row0 + (x + w - 1) * s_rowStep;
+  int cA = s_col0 + y * s_colStep, cB = s_col0 + (y + h - 1) * s_colStep;
+  int r0 = max(0, min(rA, rB)), r1 = min(s_nativeH - 1, max(rA, rB));
+  int c0 = max(0, min(cA, cB)), c1 = min(s_nativeW - 1, max(cA, cB));
+  if (r1 < r0 || c1 < c0) return;
+  if (s_bandHash) for (int k = 0; k < s_nBands; k++) s_bandHash[k] = ~0u;
+  auto* src = (const uint16_t*)s_canvas->getBuffer();
+  size_t seg = (size_t)(c1 - c0 + 1) * 2;
+  for (int r = r0; r <= r1; r++) {
+    size_t off = (size_t)r * s_nativeW + c0;
+    memcpy(s_fb + off, src + off, seg);
+  }
+  uint8_t* a0 = (uint8_t*)(s_fb + (size_t)r0 * s_nativeW + c0);
+  uint8_t* a1 = (uint8_t*)(s_fb + (size_t)r1 * s_nativeW + c1 + 1);
+  esp_cache_msync(a0, a1 - a0, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+}
+
 void setBrightness(int pct) { M5.Display.setBrightness(constrain(pct, 0, 100) * 255 / 100); }
 
 // ---- automatic 180-degree flip from the IMU ----
@@ -231,10 +293,13 @@ static void applyFlip(bool flipped) {
   int r = s_canvas->getRotation();
   int r2 = (((r & 3) + 2) & 3) | (r & 4);             // same mapping turned 180 degrees
   s_canvas->setRotation(r2);
+  s_row0 = s_nativeH - 1 - s_row0;                   // the mapping turns over too
+  s_rowStep = -s_rowStep;
+  s_col0 = s_nativeW - 1 - s_col0;
+  s_colStep = -s_colStep;
   if (s_band) {
-    s_band->setRotation(r2);
-    s_row0 = s_nativeH - 1 - s_row0;
-    s_rowStep = -s_rowStep;
+    bandsDone();
+    s_bandRot = r2;
     for (int k = 0; k < s_nBands; k++) s_bandHash[k] = ~0u;   // redraw everything
   }
   s_rotated = true;

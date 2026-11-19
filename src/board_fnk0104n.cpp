@@ -49,6 +49,7 @@ bool beginDisplay() {
 
 LGFX_Sprite& canvas() { return s_canvas; }
 void present() { St77922::pushFrame((const uint16_t*)s_canvas.getBuffer()); }
+void presentRect(int, int, int, int) { present(); }
 void setBrightness(int pct) { St77922::setBrightness(pct); }
 
 bool touch(int& x, int& y) {
@@ -72,6 +73,7 @@ const void* frameData() { return s_canvas.getBuffer(); }
 int bands() { return 0; }
 LGFX_Sprite& band(int, int& xOffset) { xOffset = 0; return s_canvas; }
 void presentBand(int) {}
+void bandsDone() {}
 
 bool orientationChanged() { return false; }
 bool hasBootButton() { return true; }
