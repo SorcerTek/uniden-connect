@@ -114,6 +114,10 @@ struct Pen {
   void fillRoundRect(int x, int y, int w, int h, int r, uint16_t col) { if (off(x, x + w, y, y + h)) return; c->fillRoundRect(X(x), Y(y), X(x + w) - X(x), Y(y + h) - Y(y), R(r), col); }
   void drawRoundRect(int x, int y, int w, int h, int r, uint16_t col) { if (off(x, x + w, y, y + h)) return; c->drawRoundRect(X(x), Y(y), X(x + w) - X(x), Y(y + h) - Y(y), R(r), col); }
   void drawFastHLine(int x, int y, int w, uint16_t col) { if (off(x, x + w, y, y + 1)) return; c->fillRect(X(x), Y(y), X(x + w) - X(x), Y(y + 1) - Y(y), col); }
+  void fillArc(int x, int y, int r0, int r1, float a0, float a1, uint16_t col) {
+    if (off(x - r1, x + r1, y - r1, y + r1)) return;
+    c->fillArc(X(x), Y(y), R(r0), R(r1), a0, a1, col);
+  }
   void fillCircle(int x, int y, int r, uint16_t col) { if (off(x - r, x + r, y - r, y + r)) return; c->fillCircle(X(x), Y(y), R(r), col); }
   void fillTriangle(int x0, int y0, int x1, int y1, int x2, int y2, uint16_t col) {
     if (off(min(x0, min(x1, x2)), max(x0, max(x1, x2)), min(y0, min(y1, y2)), max(y0, max(y1, y2)))) return;
@@ -443,7 +447,17 @@ static void drawStatusBar() {
   int spkY = s_canvas.scaled() ? 8 : 4;
   char buf[24];
   snprintf(buf, sizeof(buf), "SPK %d%%", AudioOut::volume());
-  int right = W - 110;
+  // Wi-Fi icon: arcs lit by signal strength (red dot when not connected)
+  {
+    int wx = W - 117, wy = 19;
+    bool up = WiFi.status() == WL_CONNECTED;
+    int rssi = up ? WiFi.RSSI() : -100;
+    int bars = !up ? 0 : rssi > -60 ? 3 : rssi > -72 ? 2 : 1;
+    for (int i = 0; i < 3; i++)
+      s_canvas.fillArc(wx, wy, 4 + i * 4, 6 + i * 4, 225, 315, i < bars ? C_TEXT : C_DIM);
+    s_canvas.fillCircle(wx, wy, 2, up ? C_TEXT : C_BAD);
+  }
+  int right = W - 128;
   s_canvas.setFont(spkFont);
   int levelsLeft = right - s_canvas.textWidth(buf);
   int textEnd = levelsLeft - 8;
@@ -728,7 +742,13 @@ static void pageSetup() {
     drawButton(s_btns.back(), false);
     fitText(rows[r].value, 172, y + 13, 296, &fonts::Font2, C_DEPT);
   }
-  fitText(s_setupMsg, 10, 232, 460, &fonts::Font2, s_setupMsg.startsWith("Connected") || s_setupMsg.startsWith("Saved") ? C_OK : C_HOLD);
+  if (s_setupMsg.length())
+    fitText(s_setupMsg, 10, 232, 460, &fonts::Font2, s_setupMsg.startsWith("Connected") || s_setupMsg.startsWith("Saved") ? C_OK : C_HOLD);
+  else if (WiFi.status() == WL_CONNECTED)
+    fitText("This board: " + WiFi.localIP().toString() + " on \"" + WiFi.SSID() + "\"  (" + String(WiFi.RSSI()) + " dBm)",
+            10, 232, 460, &fonts::Font2, C_DIM);
+  else
+    fitText("This board: not connected to Wi-Fi", 10, 232, 460, &fonts::Font2, C_DIM);
   add(2, 262, 200, 54, "SAVE & CONNECT", A_SAVE_CONNECT, 0, false, C_GREENKEY);
   add(206, 262, 150, 54, "FORGET WI-FI", A_FORGET_WIFI);
   add(360, 262, 118, 54, "BACK", A_GOTO, PAGE_SETTINGS);
@@ -892,7 +912,8 @@ static String sigStatus() {
   const auto& st = Sds200::status();
   char clk[16] = "";
   clockText(clk, sizeof(clk));
-  return String(st.online) + clk + st.model + RtspAudio::connected() + AudioOut::playing() + Calls::replaying() +
+  int wbars = WiFi.status() != WL_CONNECTED ? 0 : WiFi.RSSI() > -60 ? 3 : WiFi.RSSI() > -72 ? 2 : 1;
+  return String(wbars) + "|" + st.online + clk + st.model + RtspAudio::connected() + AudioOut::playing() + Calls::replaying() +
          AudioOut::muted() + RtspAudio::status() + Calls::recordingNow() + AudioOut::volume() + "|" +
          Battery::percent() + "|" + st.sig;
 }
