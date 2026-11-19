@@ -68,6 +68,10 @@ bool touch(int& x, int& y) {
 int frameWidth() { return LCD_NATIVE_W; }
 int frameHeight() { return LCD_NATIVE_H; }
 bool frameLittleEndian() { return false; }
+const void* frameData() { return s_canvas.getBuffer(); }
+int bands() { return 0; }
+LGFX_Sprite& band(int, int& xOffset) { xOffset = 0; return s_canvas; }
+void presentBand(int) {}
 
 bool hasBootButton() { return true; }
 bool hasLauncher() { return false; }

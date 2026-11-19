@@ -28,7 +28,8 @@ extern const uint8_t kAnimStart[] asm("_binary_data_boot_anim_bin_start");
 struct Pen {
   LGFX_Sprite* c = nullptr;
   float kx = 1, ky = 1;
-  int X(int x) const { return (int)lroundf(x * kx); }
+  int ox = 0;                                    // left edge of the band being drawn (canvas pixels)
+  int X(int x) const { return (int)lroundf(x * kx) - ox; }
   int Y(int y) const { return (int)lroundf(y * ky); }
   int R(int r) const { return (int)lroundf(r * (kx < ky ? kx : ky)); }
   bool scaled() const { return kx != 1 || ky != 1; }
@@ -717,7 +718,7 @@ static void drawAlert() {
 }
 
 // ---------- redraw ----------
-static void redraw() {
+static void drawPage() {
   s_canvas.fillScreen(C_BG);
   s_btns.clear();
   switch (s_page) {
@@ -745,7 +746,24 @@ static void redraw() {
     s_canvas.fillRoundRect(60, 150, 360, 40, 8, C_BTN_DOWN);
     centerText(s_toast, 240, 170, &fonts::Font4, C_TEXT);
   }
-  Board::present();
+}
+
+static void redraw() {
+  int nb = Board::bands();
+  if (nb == 0) {                                  // whole canvas at once
+    drawPage();
+    Board::present();
+    return;
+  }
+  for (int k = 0; k < nb; k++) {                  // band by band (Tab5)
+    int ox;
+    s_canvas.c = &Board::band(k, ox);
+    s_canvas.ox = ox;
+    drawPage();
+    Board::presentBand(k);
+  }
+  s_canvas.c = &Board::canvas();
+  s_canvas.ox = 0;
 }
 
 // ---------- actions ----------
@@ -1078,7 +1096,7 @@ static void serialDebug() {
   int c = Serial.read();
   if (c == 'S') {
     LGFX_Sprite& raw = Board::canvas();
-    const uint8_t* p = (const uint8_t*)raw.getBuffer();
+    const uint8_t* p = (const uint8_t*)Board::frameData();
     size_t left = raw.bufferLength();
     if (s_canvas.scaled()) {                     // "SHT3", width, height, little-endian flag (u16 LE each), pixels
       uint16_t hdr[3] = {(uint16_t)Board::frameWidth(), (uint16_t)Board::frameHeight(), (uint16_t)Board::frameLittleEndian()};

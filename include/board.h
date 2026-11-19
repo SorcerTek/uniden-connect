@@ -19,6 +19,14 @@ void present();                 // send the canvas to the screen
 int frameWidth();               // canvas buffer layout (for screenshots): width, height in
 int frameHeight();              //   buffer order, and whether pixels are little-endian RGB565
 bool frameLittleEndian();
+const void* frameData();        // what is on screen now (for screenshots)
+
+// Banded drawing (Tab5): the UI is drawn band by band into a small buffer in fast
+// internal RAM and each band is sent to the screen. bands() == 0 means draw the whole
+// canvas and call present().
+int bands();
+LGFX_Sprite& band(int k, int& xOffset);   // cleared band k; xOffset = its left edge in canvas pixels
+void presentBand(int k);
 void setBrightness(int pct);    // 0-100
 bool touch(int& x, int& y);     // finger position in canvas pixels; false if not touched
 bool hasBootButton();           // BOOT button opens the power menu
