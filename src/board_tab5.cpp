@@ -442,15 +442,21 @@ void beep(int hz, int ms) {
   M5.Speaker.playRaw(buf, n, RATE, false, 1, 7, true);
 }
 
-// Headphone-detect line on the Tab5's IO expander (PI4IOE5V6408 at 0x43, input bit 7).
-// For now this only reports changes on the Serial Monitor.
+// Headphone-detect line on the Tab5's IO expander (PI4IOE5V6408 at 0x43, input bit 7):
+// 1 = something plugged into the 3.5 mm jack. While it is, the built-in speaker's
+// amplifier (output bit 1 of the same expander) is switched off, so audio only comes
+// out of the jack.
 void pollHeadphones() {
   static uint32_t last = 0;
   static int prev = -1;
   if (millis() - last < 500) return;
   last = millis();
   int v = (M5.In_I2C.readRegister8(0x43, 0x0F, 400000) >> 7) & 1;
-  if (v != prev) { Serial.printf("Headphone detect line: %d\n", v); prev = v; }
+  if (v == prev) return;
+  prev = v;
+  if (v) M5.In_I2C.bitOff(0x43, 0x05, 0b00000010, 400000);
+  else   M5.In_I2C.bitOn(0x43, 0x05, 0b00000010, 400000);
+  Serial.printf("Headphone jack: %s (speaker %s)\n", v ? "plugged in" : "empty", v ? "off" : "on");
 }
 
 static void audioTask(void*) {
