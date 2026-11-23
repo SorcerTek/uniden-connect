@@ -677,11 +677,13 @@ The console also accepts these debug inputs:
 
 ## 15. Screenshots
 
-Taken from a running FNK0104N (3.5", 480 x 320) with firmware v2.2.0, using the serial `S` command.
-Local channel names, talkgroups, frequencies, the Wi-Fi network name and IP addresses are covered
-with grey bars (serial `R`). The Tab5 shows the same layouts at 1280 x 720 with larger, smooth fonts.
+Taken from running boards with firmware v2.2.0, using the serial `S` command: the FNK0104N
+(3.5", 480 x 320) and the Tab5 (1280 x 720, shown here at half size). Local channel names,
+talkgroups, frequencies, the Wi-Fi network name and IP addresses are covered with grey bars
+(serial `R`). The red **AUDIO STUCK** key on the Tab5 portrait main page appears only while the
+scanner refuses audio (here because the 3.5" board was the scanner's listener at the time).
 
-### 15.1 Landscape
+### 15.1 FNK0104N, landscape
 
 | | |
 |---|---|
@@ -694,7 +696,7 @@ with grey bars (serial `R`). The Tab5 shows the same layouts at 1280 x 720 with 
 | **On-screen keyboard** |  |
 | ![On-screen keyboard, landscape](images/fnk0104n-landscape-keyboard.png) |  |
 
-### 15.2 Portrait (SETTINGS > Screen rotation)
+### 15.2 FNK0104N, portrait (SETTINGS > Screen rotation)
 
 | | | | |
 |---|---|---|---|
@@ -702,3 +704,25 @@ with grey bars (serial `R`). The Tab5 shows the same layouts at 1280 x 720 with 
 | ![Main, portrait](images/fnk0104n-portrait-main.png) | ![KEYS, portrait](images/fnk0104n-portrait-keys.png) | ![SETTINGS, portrait](images/fnk0104n-portrait-settings.png) | ![RECENT, portrait](images/fnk0104n-portrait-recent.png) |
 | **FAVS** | **Power menu** | **On-screen keyboard** |  |
 | ![FAVS, portrait](images/fnk0104n-portrait-favorites.png) | ![Power menu, portrait](images/fnk0104n-portrait-power.png) | ![On-screen keyboard, portrait](images/fnk0104n-portrait-keyboard.png) |  |
+
+### 15.3 Tab5, landscape
+
+| | |
+|---|---|
+| **Main** | **KEYS** |
+| ![Main, Tab5 landscape](images/tab5-landscape-main.png) | ![KEYS, Tab5 landscape](images/tab5-landscape-keys.png) |
+| **SETTINGS** | **RECENT** |
+| ![SETTINGS, Tab5 landscape](images/tab5-landscape-settings.png) | ![RECENT, Tab5 landscape](images/tab5-landscape-recent.png) |
+| **FAVS** | **Power menu** |
+| ![FAVS, Tab5 landscape](images/tab5-landscape-favorites.png) | ![Power menu, Tab5 landscape](images/tab5-landscape-power.png) |
+| **On-screen keyboard** |  |
+| ![On-screen keyboard, Tab5 landscape](images/tab5-landscape-keyboard.png) |  |
+
+### 15.4 Tab5, portrait (held upright)
+
+| | | | |
+|---|---|---|---|
+| **Main** | **KEYS** | **SETTINGS** | **RECENT** |
+| ![Main, Tab5 portrait](images/tab5-portrait-main.png) | ![KEYS, Tab5 portrait](images/tab5-portrait-keys.png) | ![SETTINGS, Tab5 portrait](images/tab5-portrait-settings.png) | ![RECENT, Tab5 portrait](images/tab5-portrait-recent.png) |
+| **FAVS** | **Power menu** | **On-screen keyboard** |  |
+| ![FAVS, Tab5 portrait](images/tab5-portrait-favorites.png) | ![Power menu, Tab5 portrait](images/tab5-portrait-power.png) | ![On-screen keyboard, Tab5 portrait](images/tab5-portrait-keyboard.png) |  |
