@@ -680,8 +680,7 @@ The console also accepts these debug inputs:
 Taken from running boards with firmware v2.2.0, using the serial `S` command: the FNK0104N
 (3.5", 480 x 320) and the Tab5 (1280 x 720, shown here at half size). Local channel names,
 talkgroups, frequencies, the Wi-Fi network name and IP addresses are covered with grey bars
-(serial `R`). The red **AUDIO STUCK** key on the Tab5 portrait main page appears only while the
-scanner refuses audio (here because the 3.5" board was the scanner's listener at the time).
+(serial `R`).
 
 ### 15.1 FNK0104N, landscape
 
