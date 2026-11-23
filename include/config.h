@@ -71,6 +71,7 @@
 #define TOUCH_SWAP_XY       0
 
 // ---- M5Stack Tab5 (only used by the tab5 build) ------------------
+#define CHIME_MAX_VOLUME    80               // volume-key chime: never louder than at this SPK level (%)
 #define TAB5_ROTATION       3                // 1 or 3: landscape; flip if upside down
 #define TAB5_AUTO_ROTATE    1                // 1 = turn the picture with the Tab5 (IMU)
 #define TAB5_PORTRAIT       1                // 1 = switch to the portrait layout when held upright

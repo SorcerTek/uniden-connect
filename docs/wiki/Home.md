@@ -460,7 +460,7 @@ The device then shows the main screen. The scanner indicator turns green once GS
 | Buttons | **SPK −**, **SPK +** (board speaker), **MUTE** (board speaker only), **KEYS**, **SCAN** (above MUTE), **WX** (above KEYS) |
 
 - The scanner's own volume and squelch are not changed by the device.
-- **SPK −** / **SPK +** play a soft chime at the new level (unless muted): a higher note for up, a lower one for down.
+- **SPK −** / **SPK +** play a soft chime at the new level (unless muted): a higher note for up, a lower one for down. Above 80 % the chime stays at the 80 % loudness (`CHIME_MAX_VOLUME`).
 - **WX** puts the scanner into NOAA weather mode.
 - **SCAN** returns the scanner to normal scanning and releases any System / Department / Channel hold.
 - Whichever of WX and SCAN is active is outlined.

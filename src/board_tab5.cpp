@@ -485,12 +485,16 @@ void beep(int hz, int ms) {
     float env = min(1.0f, min(i, n - i) / 160.0f);  // 10 ms fade in/out (no clicks)
     buf[i] = (int16_t)(12000 * env * sinf(2.0f * PI * hz * i / RATE));
   }
+  M5.Speaker.setChannelVolume(7, 255);
   M5.Speaker.playRaw(buf, n, RATE, false, 1, 7, true);
 }
 
 void chime(bool up) {
   int16_t* buf = s_toneBuf;
   size_t n = makeChime(buf, sizeof(s_toneBuf) / 2, 16000, up ? 698.5f : 523.3f, 9000);   // F5 up, C5 down
+  // Above CHIME_MAX_VOLUME the chime stays at that level (the level scales the samples linearly).
+  int v = s_volume > CHIME_MAX_VOLUME ? 255 * CHIME_MAX_VOLUME / s_volume : 255;
+  M5.Speaker.setChannelVolume(7, v);
   M5.Speaker.playRaw(buf, n, 16000, false, 1, 7, true);
 }
 

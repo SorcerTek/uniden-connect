@@ -21,7 +21,8 @@ What it does:
 
 The scanner is expected at **192.168.1.2** by default. Change it on the board's setup screen.
 
-**Current version: v2.1.0** (shown under SETTINGS and on the boot screen).
+**Current version: v2.1.0** (shown under SETTINGS and on the boot screen). Both boards always share the same
+version number: every release includes both, even when a change only affects one of them.
 
 | Version | Date | What changed |
 |---|---|---|

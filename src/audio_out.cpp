@@ -234,7 +234,14 @@ void chime(bool up) {
   if (!s_chime) return;
   s_chimeLen = 0;                              // stop the one playing while the samples change
   s_chimePos = 0;
-  s_chimeLen = makeChime(s_chime, MAX, AUDIO_OUT_RATE, up ? 698.5f : 523.3f, 6500);   // F5 up, C5 down
+  // The codec's volume steps are 0.5 dB each (see codecVolume()); above CHIME_MAX_VOLUME the
+  // chime is turned down by the difference, so it never gets louder than at that level.
+  float peak = 6500;
+  if (s_volume > CHIME_MAX_VOLUME) {
+    int steps = (s_volume * 256 / 100) - (CHIME_MAX_VOLUME * 256 / 100);
+    peak *= powf(10.0f, -0.5f * steps / 20.0f);
+  }
+  s_chimeLen = makeChime(s_chime, MAX, AUDIO_OUT_RATE, up ? 698.5f : 523.3f, peak);   // F5 up, C5 down
 }
 
 void beep(int hz, int ms) {
