@@ -21,11 +21,12 @@ What it does:
 
 The scanner is expected at **192.168.1.2** by default. Change it on the board's setup screen.
 
-**Current version: v2.1.0** (shown under SETTINGS and on the boot screen). Both boards always share the same
+**Current version: v2.2.0** (shown under SETTINGS and on the boot screen). Both boards always share the same
 version number: every release includes both, even when a change only affects one of them.
 
 | Version | Date | What changed |
 |---|---|---|
+| v2.2.0 | 2026-11-23 | 3.5" board: screen orientation in SETTINGS (Landscape, Portrait, Land. flip, Port. flip; portrait layouts and boot screen), and the power menu's LAUNCHER button when installed under bmorcelli's Launcher. |
 | v2.1.0 | 2026-11-23 | Tab5: portrait mode (the picture follows the Tab5 in all four directions, with portrait layouts for every page), screen-rotation lock in SETTINGS, built-in speaker muted while something is plugged into the 3.5 mm jack. Both boards: SPK + / SPK - play a soft chime instead of the sharp beep. |
 | v2.0.1 | 2026-11-19 | Tab5: after auto-rotating, the whole screen is redrawn (no upside-down "ghost" top bar over the buttons); version and status text now visible on the boot screen; Settings shows "Version x.y.z". |
 | v2.0.0 | 2026-11-19 | M5Stack Tab5 support (should support all display versions (only tested on the latest S7221 display driver), Launcher install, smooth 1280x720 display, auto-flip, louder speaker). Both boards: POWER button on the KEYS page, Wi-Fi icon, board IP on the setup screen, instant volume beep. |
@@ -141,6 +142,10 @@ touch) and wakes on activity or a touch. The first touch on a dim screen only wa
 Below that: Wi-Fi and IP, scanner IP, SD card space, wireless update status, and the buttons
 **WI-FI SETUP**, **RECONNECT AUDIO**, **REBOOT SCANNER** (tap twice).
 
+**Screen rotation** (SETTINGS): on the 3.5" board, + / - step through **Landscape**, **Portrait**,
+**Land. flip** and **Port. flip** (upside down). The screen turns straight away, every page has a
+portrait layout, and the choice is kept after a restart. (The Tab5 turns by itself; see section 8.)
+
 All settings (speaker volume, mute, brightness, dimming, recording, favorites, Wi-Fi, scanner IP)
 are saved on the board and survive restarts and power-off.
 
@@ -173,6 +178,8 @@ folders on a computer when you like.
 - **POWER OFF**: finishes any recording, closes the audio stream cleanly, turns off the screen and
   speaker, and puts the board into deep sleep. Press **BOOT** once to turn it back on.
 - **RESTART**: the same clean shutdown, then a restart.
+- **LAUNCHER** (only when installed under bmorcelli's Launcher): the same clean shutdown, then back
+  to the Launcher.
 - **CANCEL** (or a short press of BOOT) goes back.
 
 "Off" is a very low-power sleep, not a true power cut: the battery charger and screen circuitry still

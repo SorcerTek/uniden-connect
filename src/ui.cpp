@@ -744,6 +744,17 @@ static String dimAfterText(uint16_t s) {
   return String(s / 60) + " min";
 }
 
+// Screen rotation value: Auto / Locked where the board turns the picture itself (Tab5),
+// otherwise the chosen orientation (FNK0104N).
+static String rotationText() {
+  if (Board::autoRotates()) return Settings::screenLock() < 0 ? "Auto" : "Locked";
+  static const char* names[] = {"Landscape", "Portrait", "Land. flip", "Port. flip"};
+  return names[constrain(Board::orientation(), 0, 3)];
+}
+static const lgfx::IFont* valueFont(const String& v) {   // long values in the smaller font
+  return v.length() > 7 ? (const lgfx::IFont*)&fonts::Font2 : (const lgfx::IFont*)&fonts::Font4;
+}
+
 static void pageSettings() {
   header("Settings", "Version " UC_VERSION);
   const auto& c = Settings::get();
@@ -751,7 +762,7 @@ static void pageSettings() {
     {"Brightness", String(c.brightness) + "%"},
     {"Dim after", dimAfterText(c.dimAfterS)},
     {portrait() ? "Dim level" : "Dimmed level", c.dimLevel ? String(c.dimLevel) + "%" : String("Off")},
-    {portrait() ? "Rotation" : "Screen rotation", Settings::screenLock() < 0 ? String("Auto") : String("Locked")},
+    {portrait() ? "Rotation" : "Screen rotation", rotationText()},
   };
   bool tall = portrait();
   // A fourth row (screen rotation) only on boards that turn the picture (Tab5); the
@@ -763,12 +774,12 @@ static void pageSettings() {
     if (tall) {
       fitText(rows[r].label, 10, y + bh / 2 - 8, 118, &fonts::Font2, C_TEXT);
       add(130, y, 50, bh, "-", A_ADJ, r * 2);
-      centerText(rows[r].value, (180 + W - 52) / 2, y + bh / 2, &fonts::Font4, C_DEPT);
+      centerText(rows[r].value, (180 + W - 52) / 2, y + bh / 2, valueFont(rows[r].value), C_DEPT);
       add(W - 52, y, 50, bh, "+", A_ADJ, r * 2 + 1);
     } else {
       fitText(rows[r].label, 12, y + bh / 2 - 11, 220, &fonts::Font4, C_TEXT);
       add(250, y, 60, bh, "-", A_ADJ, r * 2);
-      centerText(rows[r].value, 355, y + bh / 2, &fonts::Font4, C_DEPT);
+      centerText(rows[r].value, 355, y + bh / 2, valueFont(rows[r].value), C_DEPT);
       add(400, y, 60, bh, "+", A_ADJ, r * 2 + 1);
     }
   }
@@ -1183,6 +1194,12 @@ static void adjustSetting(int which, int dir) {
     while (i < 5 && kDimAfter[i] != c.dimAfterS) i++;
     c.dimAfterS = kDimAfter[constrain(i + dir, 0, 5)];
   }
+  if (which == 3 && !Board::autoRotates()) {       // screen orientation: step through the four
+    int k = (Board::orientation() + dir + 4) % 4;
+    Settings::setScreenLock(k);
+    Board::setOrientation(k);
+    return;
+  }
   if (which == 3) {                                // screen rotation: Auto <-> locked where it is now
     int lock = Settings::screenLock() < 0 ? Board::orientation() : -1;
     Settings::setScreenLock(lock);
@@ -1485,6 +1502,15 @@ static void drawBootStatus(const char* status) {
   s_canvas.setTextDatum(textdatum_t::top_left);
 }
 
+// A 480x320 boot image: full screen in landscape; in portrait shrunk to the screen's
+// width and centred between black bars.
+static bool bootJpg(const uint8_t* d, uint32_t len) {
+  if (!portrait()) return s_canvas.drawJpg(d, len, 0, 0);
+  s_canvas.fillScreen(C_BG);
+  float k = (float)W / 480;
+  return s_canvas.c->drawJpg(d, len, 0, (H - (int)(320 * k)) / 2, 0, 0, 0, 0, k * s_canvas.kx, k * s_canvas.ky);
+}
+
 void showLogo(const char* status) {
 #if defined(BOARD_TAB5)
   {
@@ -1496,8 +1522,7 @@ void showLogo(const char* status) {
     return;
   }
 #endif
-  s_canvas.fillScreen(C_BG);
-  s_canvas.drawJpg(kLogoStart, kLogoEnd - kLogoStart, 0, 0);
+  bootJpg(kLogoStart, kLogoEnd - kLogoStart);
   drawBootStatus(status);
   Board::present();
 }
@@ -1526,7 +1551,7 @@ void bootAnimFrame(const char* status) {
   Board::presentHalf(h);
   s_regionsValid = false;
 #else
-  if (!s_canvas.drawJpg(a + off, len, 0, 0)) s_canvas.drawJpg(kLogoStart, kLogoEnd - kLogoStart, 0, 0);
+  if (!bootJpg(a + off, len)) bootJpg(kLogoStart, kLogoEnd - kLogoStart);
   drawBootStatus(status);
   int32_t wait = (int32_t)(nextAt - millis());
   if (wait > 0 && wait <= ms) delay(wait);

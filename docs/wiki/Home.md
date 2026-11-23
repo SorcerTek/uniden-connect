@@ -6,7 +6,7 @@ Welcome to the uniden-connect wiki!
 |---|---|
 | **Product** | Uniden Connect: network touchscreen remote and audio receiver for the Uniden SDS200 |
 | **Target hardware** | Freenove ESP32-S3 3.5" Display, FNK0104N (ESP32-S3-WROOM-1 N8R8); M5Stack Tab5 (ESP32-P4, 5" 1280x720) |
-| **Firmware baseline** | Version **v2.1.0**, `main` branch, tag `v2.1.0` (2026-11-23) |
+| **Firmware baseline** | Version **v2.2.0**, `main` branch, tag `v2.2.0` (2026-11-23) |
 | **Repository** | https://github.com/SorcerTek/uniden-connect |
 | **Document status** | Released. Describes the firmware exactly as it is at the baseline commit above. |
 
@@ -56,9 +56,9 @@ This document is the technical reference for the Uniden Connect firmware. It cov
 | F7 | Six favourites that hold the scanner on a saved department or system. |
 | F8 | On-screen Wi-Fi, scanner-IP and update-password setup, stored in non-volatile memory. |
 | F9 | Wireless (OTA) firmware updates. |
-| F10 | Software power control from the BOOT button or **KEYS > POWER** (power off, restart, and on the Tab5 a return to the Launcher), with a clean audio-session teardown. |
+| F10 | Software power control from the BOOT button or **KEYS > POWER** (power off, restart, and a return to bmorcelli's Launcher when installed under it), with a clean audio-session teardown. |
 | F11 | Network time clock, idle screen dimming, battery level indication, Wi-Fi signal icon, selectable key-backlight colour, boot logo and boot animation, firmware version display. |
-| F12 | Runs on two boards from one source tree: Freenove FNK0104N and M5Stack Tab5 (all Tab5 display revisions). On the Tab5 the screen follows the device in all four directions (portrait layouts included), with a rotation lock. |
+| F12 | Runs on two boards from one source tree: Freenove FNK0104N and M5Stack Tab5 (all Tab5 display revisions). On the Tab5 the screen follows the device in all four directions (portrait layouts included), with a rotation lock; the FNK0104N's orientation is chosen in SETTINGS. |
 
 ---
 
@@ -178,8 +178,8 @@ The boot logo and animation are decoded with the ESP32-P4's hardware JPEG decode
 | Module | Responsibility |
 |---|---|
 | `src/main.cpp` | Start-up sequence and main loop. |
-| `include/board.h` | Board interface: display start-up, canvas, screen updates (full, region, half-size), brightness, touch, orientation, Launcher support. |
-| `src/board_fnk0104n.cpp` | FNK0104N board layer (ST77922 panel, touch mapping). |
+| `include/board.h` | Board interface: display start-up, canvas, screen updates (full, region, half-size), brightness, touch, orientation (automatic or chosen), Launcher support. |
+| `src/board_fnk0104n.cpp` | FNK0104N board layer (ST77922 panel, touch mapping for the chosen orientation, Launcher return). |
 | `src/board_tab5.cpp` | Tab5 board layer: frame-buffer display updates, IMU auto-rotation (four orientations), headphone detection, M5.Speaker audio output, battery, power and Launcher return. |
 | `src/display_st77922.*` | ST77922 QSPI panel driver: init, PWM brightness, sleep, full-frame push in horizontal bands. |
 | `src/touch_st77922.*` | Touch controller driver (I2C 0x55, 16-bit registers). |
@@ -337,7 +337,7 @@ The received SDP is printed on the serial console for diagnostics.
 | Dim after | Never, 30 s, 1, 2, 5, 10 min | SETTINGS |
 | Dimmed level | Off, 5, 10, 20, 30, 50 % | SETTINGS |
 | Key light colour | Amber, Orange, Red, Yellow, Green, Ice, Blue, Purple, Pink, White | SETTINGS |
-| Screen rotation (Tab5) | Auto, or Locked at the current orientation | SETTINGS |
+| Screen rotation | Tab5: Auto, or Locked at the current orientation. FNK0104N: Landscape, Portrait, Land. flip, Port. flip | SETTINGS |
 | Recording | On/off | KEYS > REC ON / REC OFF |
 | Favourites | 6 slots | FAVS |
 
@@ -497,7 +497,7 @@ The device then shows the main screen. The scanner indicator turns green once GS
 ### 9.5 SETTINGS screen
 
 - The header shows the firmware version ("Version 2.1.0").
-- Brightness, dim-after time, dimmed level, screen rotation (Tab5: Auto / Locked) and key-light colour.
+- Brightness, dim-after time, dimmed level, screen rotation (Tab5: Auto / Locked; FNK0104N: the four orientations) and key-light colour.
 - Status of Wi-Fi / IP, scanner IP, SD card free space and the OTA service.
 - **WI-FI SETUP** (with **FORGET WI-FI**), **RECONNECT AUDIO**, **REBOOT SCANNER** (tap twice), **BACK**.
 
@@ -526,7 +526,7 @@ The device then shows the main screen. The scanner indicator turns green once GS
 | **POWER OFF** | Finishes the recording, sends RTSP `TEARDOWN`, saves settings, turns off the panel, backlight and amplifier, and enters deep sleep |
 | **RESTART** | Same clean shutdown, then a software restart |
 | **CANCEL** or a short BOOT press | Closes the menu |
-| **LAUNCHER** (Tab5, when installed under bmorcelli's Launcher) | Clean shutdown, then boots the Launcher |
+| **LAUNCHER** (when installed under bmorcelli's Launcher) | Clean shutdown, then boots the Launcher |
 | BOOT press while off (FNK0104N) / power button (Tab5) | Turns the device back on |
 
 Deep sleep is a low-power state, not an isolation of the battery. Disconnect the battery for long-term storage.
@@ -536,9 +536,9 @@ Deep sleep is a low-power state, not an isolation of the battery. Disconnect the
 Shows the percentage derived from the sensed cell voltage (FNK0104N) or from M5Unified's power
 monitor (Tab5). `--` means there is no valid reading.
 
-### 9.10 Tab5 screen orientation
+### 9.10 Screen orientation
 
-The picture and the touch input follow the Tab5 in four directions: landscape, landscape upside
+On the Tab5 the picture and the touch input follow the Tab5 in four directions: landscape, landscape upside
 down, and portrait either way up. A new position is taken after it has been held for about a
 second; lying flat keeps the last one. The whole screen is redrawn after each turn.
 
@@ -548,7 +548,14 @@ wrap onto two lines, the speaker level moves next to SCAN / WX, KEYS becomes thr
 
 **SETTINGS > Screen rotation** set to *Locked* keeps the current orientation, including after a
 restart; *Auto* follows the Tab5 again. `TAB5_PORTRAIT` 0 limits it to landscape and
-`TAB5_AUTO_ROTATE` 0 turns rotation off.
+`TAB5_AUTO_ROTATE` 0 turns rotation off (SETTINGS then offers the four orientations, as on the
+FNK0104N).
+
+The FNK0104N has no motion sensor: **SETTINGS > Screen rotation** steps through *Landscape*,
+*Portrait*, *Land. flip* and *Port. flip*. The canvas is turned and the touch mapping measured
+again, the same portrait layouts are used, and the 480 x 320 boot logo and animation are shown
+at two-thirds size between black bars in portrait. The choice is stored in NVS (`rotlock`) and
+applied at start-up.
 
 ---
 
@@ -643,7 +650,6 @@ The console also accepts these debug inputs:
 - Only 2.4 GHz Wi-Fi is supported (ESP32-S3 and ESP32-C6 limitation).
 - Bluetooth speakers are not supported: both boards have Bluetooth Low Energy only, which cannot stream audio to A2DP speakers. A Bluetooth transmitter on the audio output (Tab5 3.5 mm jack) can be used instead.
 - Tab5: no wireless (OTA) updates (installs go through the Launcher).
-- FNK0104N: landscape only (no motion sensor; the portrait layouts are Tab5-only for now).
 - The scanner's own volume and squelch are not controlled from the device.
 - The 1050 Hz alert works only while the scanner is receiving a NOAA weather channel.
 - Audio quality is limited by the scanner's stream: G.711, 8 kHz.

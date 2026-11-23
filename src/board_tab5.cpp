@@ -388,6 +388,7 @@ static void autoRotate() {
 
 // Fixed orientation for testing (the IMU is ignored); k outside 0..3 goes back to automatic.
 int orientation() { return s_orient; }
+bool autoRotates() { return TAB5_AUTO_ROTATE != 0; }
 
 void setOrientation(int k) {
   s_fixed = k >= 0 && k <= 3;

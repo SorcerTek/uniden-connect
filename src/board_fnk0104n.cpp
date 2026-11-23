@@ -4,6 +4,8 @@
 #include "config.h"
 #include "display_st77922.h"
 #include "touch_st77922.h"
+#include <esp_ota_ops.h>
+#include <esp_partition.h>
 
 namespace Board {
 
@@ -76,12 +78,36 @@ LGFX_Sprite& band(int, int& xOffset) { xOffset = 0; return s_canvas; }
 void presentBand(int) {}
 void bandsDone() {}
 
-bool orientationChanged() { return false; }
-void setOrientation(int) {}
-int orientation() { return -1; }
+// No motion sensor: the orientation is chosen in SETTINGS (Landscape / Portrait / either
+// flipped). The canvas is turned and the touch mapping measured again.
+static int s_orient = 0;
+static bool s_rotated = false;
+int orientation() { return s_orient; }
+bool autoRotates() { return false; }
+void setOrientation(int k) {
+  if (k < 0 || k > 3) k = 0;
+  if (k == s_orient) return;
+  s_orient = k;
+  s_canvas.setRotation((((SCREEN_ROTATION & 3) + k) & 3) | (SCREEN_ROTATION & 4));
+  measureRotation();
+  s_rotated = true;
+}
+bool orientationChanged() { bool r = s_rotated; s_rotated = false; return r; }
 bool hasBootButton() { return true; }
-bool hasLauncher() { return false; }
-void exitToLauncher() {}
+// bmorcelli's Launcher installs itself as the factory app and runs other firmware from an
+// app slot. Running from a slot while a factory app exists = installed under the Launcher.
+static const esp_partition_t* factoryPartition() {
+  return esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_FACTORY, nullptr);
+}
+bool hasLauncher() {
+  const esp_partition_t* f = factoryPartition();
+  return f && esp_ota_get_running_partition() != f;
+}
+void exitToLauncher() {
+  const esp_partition_t* f = factoryPartition();
+  if (f) esp_ota_set_boot_partition(f);
+  ESP.restart();
+}
 
 }  // namespace Board
 #endif
