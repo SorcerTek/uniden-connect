@@ -56,6 +56,16 @@ void setKeyColor(int i) {
   p.end();
 }
 
+static int s_screenLock = -1;
+int screenLock() { return s_screenLock; }
+void setScreenLock(int k) {
+  s_screenLock = (k >= 0 && k <= 3) ? k : -1;
+  Preferences p;
+  if (!p.begin("uconnect", false)) return;
+  p.putChar("rotlock", (int8_t)s_screenLock);
+  p.end();
+}
+
 static void loadConnection() {
   s_ssid = getStr("ssid", "");
   s_pass = getStr("pass", "");
@@ -63,7 +73,12 @@ static void loadConnection() {
   s_ota = getStr("otapw", "");
   {
     Preferences p;
-    if (p.begin("uconnect", true)) { s_keyColor = p.getUChar("keycol", 0); p.end(); }
+    if (p.begin("uconnect", true)) {
+      s_keyColor = p.getUChar("keycol", 0);
+      s_screenLock = p.getChar("rotlock", -1);
+      if (s_screenLock > 3) s_screenLock = -1;
+      p.end();
+    }
   }
   // First boot of this version: take the details from secrets.h if it was filled in.
 #if defined(WIFI_SSID) && defined(WIFI_PASSWORD)

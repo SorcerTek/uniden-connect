@@ -110,6 +110,8 @@ void push(const int16_t* samples, size_t n) {
 void flush() { s_flush = true; }
 void setStreamRate(uint32_t hz) { if (hz >= 4000 && hz <= 48000) s_streamRate = hz; }
 
+static int16_t* s_chime = nullptr;               // chime samples (see chime())
+static std::atomic<uint32_t> s_chimeLen{0}, s_chimePos{0};
 static std::atomic<uint32_t> s_toneLeft{0};      // tone samples still to play (see beep())
 static std::atomic<uint32_t> s_toneStep{0};      // 16.16 phase step per output sample
 
@@ -155,6 +157,11 @@ static void audioTask(void*) {
         int32_t v = s + (int32_t)(9000 * sinf(2.0f * PI * (tph & 0xFFFF) / 65536.0f));
         s = (int16_t)constrain(v, -32768, 32767);
         s_toneLeft--;
+      }
+      uint32_t cp = s_chimePos.load();
+      if (cp < s_chimeLen.load()) {            // volume-key chime
+        s = (int16_t)constrain((int32_t)s + s_chime[cp], -32768, 32767);
+        s_chimePos = cp + 1;
       }
       out[i * 2] = s;
       out[i * 2 + 1] = s;
@@ -221,6 +228,15 @@ uint32_t queued() { return s_head.load() - s_tail.load(); }
 uint32_t streamRate() { return s_streamRate.load(); }
 
 // Short tone mixed straight into the speaker output (does not wait for the jitter buffer).
+void chime(bool up) {
+  static const size_t MAX = AUDIO_OUT_RATE / 2;
+  if (!s_chime) s_chime = (int16_t*)malloc(MAX * sizeof(int16_t));
+  if (!s_chime) return;
+  s_chimeLen = 0;                              // stop the one playing while the samples change
+  s_chimePos = 0;
+  s_chimeLen = makeChime(s_chime, MAX, AUDIO_OUT_RATE, up ? 698.5f : 523.3f, 6500);   // F5 up, C5 down
+}
+
 void beep(int hz, int ms) {
   s_toneStep = (uint32_t)(((uint64_t)hz << 16) / AUDIO_OUT_RATE);
   s_toneLeft = (uint32_t)AUDIO_OUT_RATE * ms / 1000;

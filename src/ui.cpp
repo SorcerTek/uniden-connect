@@ -751,43 +751,51 @@ static void pageSettings() {
     {"Brightness", String(c.brightness) + "%"},
     {"Dim after", dimAfterText(c.dimAfterS)},
     {portrait() ? "Dim level" : "Dimmed level", c.dimLevel ? String(c.dimLevel) + "%" : String("Off")},
+    {portrait() ? "Rotation" : "Screen rotation", Settings::screenLock() < 0 ? String("Auto") : String("Locked")},
   };
   bool tall = portrait();
-  for (int r = 0; r < 3; r++) {
-    int y = 30 + r * 46;
+  // A fourth row (screen rotation) only on boards that turn the picture (Tab5); the
+  // rows then sit a little closer together.
+  bool rot = Board::orientation() >= 0;
+  int n = rot ? 4 : 3, pitch = rot ? (tall ? 44 : 37) : 46, bh = pitch - 4;
+  for (int r = 0; r < n; r++) {
+    int y = 30 + r * pitch;
     if (tall) {
-      fitText(rows[r].label, 10, y + 13, 118, &fonts::Font2, C_TEXT);
-      add(130, y, 50, 42, "-", A_ADJ, r * 2);
-      centerText(rows[r].value, (180 + W - 52) / 2, y + 21, &fonts::Font4, C_DEPT);
-      add(W - 52, y, 50, 42, "+", A_ADJ, r * 2 + 1);
+      fitText(rows[r].label, 10, y + bh / 2 - 8, 118, &fonts::Font2, C_TEXT);
+      add(130, y, 50, bh, "-", A_ADJ, r * 2);
+      centerText(rows[r].value, (180 + W - 52) / 2, y + bh / 2, &fonts::Font4, C_DEPT);
+      add(W - 52, y, 50, bh, "+", A_ADJ, r * 2 + 1);
     } else {
-      fitText(rows[r].label, 12, y + 10, 220, &fonts::Font4, C_TEXT);
-      add(250, y, 60, 42, "-", A_ADJ, r * 2);
-      centerText(rows[r].value, 355, y + 21, &fonts::Font4, C_DEPT);
-      add(400, y, 60, 42, "+", A_ADJ, r * 2 + 1);
+      fitText(rows[r].label, 12, y + bh / 2 - 11, 220, &fonts::Font4, C_TEXT);
+      add(250, y, 60, bh, "-", A_ADJ, r * 2);
+      centerText(rows[r].value, 355, y + bh / 2, &fonts::Font4, C_DEPT);
+      add(400, y, 60, bh, "+", A_ADJ, r * 2 + 1);
     }
   }
 
   // Key light: sample keys, tap one to use it
-  fitText("Key light", 12, 170, 200, &fonts::Font2, C_TEXT);
+  int ky = 30 + n * pitch + 2;
+  int sh = rot ? (tall ? 38 : 34) : 40;               // swatch height
+  fitText("Key light", 12, ky, 200, &fonts::Font2, C_TEXT);
   s_canvas.setFont(&fonts::Font2);
   int kx = max(90, 12 + s_canvas.textWidth("Key light") + 10);
-  fitText(kKeyLights[Settings::keyColor()].name, kx, 170, 200, &fonts::Font2, s_glow[Settings::keyColor()].full);
+  fitText(kKeyLights[Settings::keyColor()].name, kx, ky, 200, &fonts::Font2, s_glow[Settings::keyColor()].full);
   for (int i = 0; i < NUM_KEYLIGHTS; i++) {
-    if (tall) add(2 + (i % 5) * 63, 188 + (i / 5) * 44, 60, 40, kKeyLights[i].name, A_KEYLIGHT, i, i == Settings::keyColor(), C_BTN, i);
-    else add(2 + i * 48, 188, 44, 40, kKeyLights[i].name, A_KEYLIGHT, i, i == Settings::keyColor(), C_BTN, i);
+    if (tall) add(2 + (i % 5) * 63, ky + 18 + (i / 5) * (sh + 4), 60, sh, kKeyLights[i].name, A_KEYLIGHT, i, i == Settings::keyColor(), C_BTN, i);
+    else add(2 + i * 48, ky + 18, 44, sh, kKeyLights[i].name, A_KEYLIGHT, i, i == Settings::keyColor(), C_BTN, i);
   }
+  int infoY = tall ? ky + 18 + 2 * (sh + 4) + 2 : ky + 18 + sh + 4;
 
   String wifi = WiFi.status() == WL_CONNECTED ? "Wi-Fi: " + WiFi.SSID() + "  IP " + WiFi.localIP().toString()
                                               : String("Wi-Fi: not connected");
   String sd = Calls::sdInfo() + (Calls::sdOk() ? (Settings::get().record ? ", recording on" : ", recording off") : String(""));
   String upd = Board::hasLauncher() ? String("via Launcher") : Ota::enabled() ? String(OTA_HOSTNAME) + ".local" : String("off");
   if (tall) {
-    int y = 280;
+    int y = infoY;
     String lines[4] = {wifi, "Scanner: " + Settings::scannerIp(), sd, "Updates: " + upd};
     for (const String& l : lines) {
       fitText(l, 12, y, W - 24, &fonts::Font0, C_DIM);
-      y += 14;
+      y += rot ? 13 : 14;
     }
     int bw = (W - 6) / 2;
     add(2, H - 116, bw, 54, "WI-FI SETUP", A_GOTO, PAGE_SETUP);
@@ -796,7 +804,7 @@ static void pageSettings() {
     add(4 + bw, H - 58, bw, 54, "BACK", A_GOTO, PAGE_KEYS);
     return;
   }
-  int y = 232;
+  int y = infoY;
   fitText(wifi + "   Scanner: " + Settings::scannerIp(), 12, y, 456, &fonts::Font0, C_DIM); y += 12;
   fitText(sd + "   Updates: " + upd, 12, y, 456, &fonts::Font0, C_DIM);
 
@@ -1175,6 +1183,12 @@ static void adjustSetting(int which, int dir) {
     while (i < 5 && kDimAfter[i] != c.dimAfterS) i++;
     c.dimAfterS = kDimAfter[constrain(i + dir, 0, 5)];
   }
+  if (which == 3) {                                // screen rotation: Auto <-> locked where it is now
+    int lock = Settings::screenLock() < 0 ? Board::orientation() : -1;
+    Settings::setScreenLock(lock);
+    Board::setOrientation(lock);
+    return;
+  }
   if (which == 2) {
     int i = 0;
     while (i < 5 && kDimLevel[i] != c.dimLevel) i++;
@@ -1231,7 +1245,7 @@ static void doAction(const Button& b, bool longPress) {
       AudioOut::setVolume(AudioOut::volume() + (b.action == A_SPK_UP ? 10 : -10));
       Settings::get().spkVolume = AudioOut::volume();
       Settings::changed();
-      if (!AudioOut::muted()) AudioOut::beep(880, 120);   // hear the new level right away
+      if (!AudioOut::muted()) AudioOut::chime(b.action == A_SPK_UP);   // hear the new level right away
       toast(String("Speaker ") + AudioOut::volume() + "%");
       break;
     case A_SPK_MUTE:
@@ -1444,6 +1458,7 @@ static void setLayout() {
 
 bool begin() {
   if (!Board::beginDisplay()) return false;
+  if (Settings::screenLock() >= 0) Board::setOrientation(Settings::screenLock());   // locked: start that way round
   setLayout();
   initGlows();
   s_lastActivity = millis();
@@ -1566,8 +1581,8 @@ static void serialDebug() {
       p += n; left -= n;
       if (!n) delay(2);
     }
-  } else if (c == 'B') {                          // play the volume beep
-    AudioOut::beep(880, 120);
+  } else if (c == 'B') {                          // play the volume chime (up)
+    AudioOut::chime(true);
   } else if (c == 'L') {                          // show the boot logo (checking colours)
     showLogo("logo test");
   } else if (c == 'O') {

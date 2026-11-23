@@ -36,6 +36,8 @@ void setScannerIp(const String& ip);
 void setOtaPassword(const String& pw);
 int keyColor();            // index into the UI's key-light colour list
 void setKeyColor(int i);
+int screenLock();          // Tab5 screen rotation: -1 = automatic, 0-3 = locked at that orientation
+void setScreenLock(int k);
 
 void begin();              // load (or defaults)
 Data& get();

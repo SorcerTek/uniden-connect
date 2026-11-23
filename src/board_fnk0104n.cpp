@@ -78,6 +78,7 @@ void bandsDone() {}
 
 bool orientationChanged() { return false; }
 void setOrientation(int) {}
+int orientation() { return -1; }
 bool hasBootButton() { return true; }
 bool hasLauncher() { return false; }
 void exitToLauncher() {}

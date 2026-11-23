@@ -33,7 +33,8 @@ void bandsDone();                        // wait until the last band is on scree
 void setBrightness(int pct);    // 0-100
 bool touch(int& x, int& y);     // finger position in canvas pixels; false if not touched
 bool orientationChanged();      // the screen was turned (Tab5 auto-rotate): redraw everything
-void setOrientation(int k);     // Tab5: quarter turns from the normal landscape (serial debug)
+int orientation();              // Tab5: quarter turns from the normal landscape (0-3); -1 = this board doesn't turn
+void setOrientation(int k);     // Tab5: fix the picture at k quarter turns; k < 0 = turn with the board (IMU)
 bool hasBootButton();           // BOOT button opens the power menu
 bool hasLauncher();             // installed under bmorcelli's Launcher (offer "exit to Launcher")
 void exitToLauncher();
