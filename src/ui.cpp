@@ -283,9 +283,23 @@ static bool s_kbShow = false;
 struct FitCache { String in; int maxW; const lgfx::IFont* font; String out; };
 static std::vector<FitCache> s_fitCache;
 
-static void fitText(const String& txt, int x, int y, int maxW, const lgfx::IFont* font, uint16_t color) {
+// Screenshot redaction (serial "R"): text passed through S() is drawn as a grey bar of the
+// same size instead, for screenshots that shouldn't show local channel names or network details.
+static bool s_redact = false;
+static const char REDACT = '\x01';
+static String S(const String& t) { return s_redact && t.length() ? String(REDACT) + t : t; }
+
+static void fitText(const String& in, int x, int y, int maxW, const lgfx::IFont* font, uint16_t color) {
+  bool secret = in.length() && in[0] == REDACT;
+  const String& txt = secret ? in.substring(1) : in;
   s_canvas.setFont(font);
   s_canvas.setTextColor(color);
+  if (secret) {
+    int w = min(maxW, s_canvas.textWidth(txt.c_str()));
+    int h = (int)(s_canvas.c->fontHeight() / s_canvas.ky);
+    s_canvas.fillRoundRect(x, y, max(w, 8), max(h - 2, 6), 3, 0x4208);
+    return;
+  }
   for (auto& f : s_fitCache)
     if (f.maxW == maxW && f.font == font && f.in == txt) { s_canvas.drawString(f.out.c_str(), x, y); return; }
   String t = txt;
@@ -307,7 +321,10 @@ static void centerText(const String& t, int x, int y, const lgfx::IFont* font, u
 
 // Like fitText, but a name too long for one line breaks at a space onto a second line.
 // Returns the number of lines used.
-static int wrapText(const String& txt, int x, int y, int maxW, int lineH, const lgfx::IFont* font, uint16_t color) {
+static int wrapText(const String& in, int x, int y, int maxW, int lineH, const lgfx::IFont* font, uint16_t color) {
+  bool secret = in.length() && in[0] == REDACT;
+  String txt = secret ? in.substring(1) : in;
+  String pre = secret ? String(REDACT) : String();
   s_canvas.setFont(font);
   if (s_canvas.textWidth(txt.c_str()) > maxW) {
     int cut = -1;
@@ -316,12 +333,12 @@ static int wrapText(const String& txt, int x, int y, int maxW, int lineH, const 
       cut = i;
     }
     if (cut > 0) {
-      fitText(txt.substring(0, cut), x, y, maxW, font, color);
-      fitText(txt.substring(cut + 1), x, y + lineH, maxW, font, color);
+      fitText(pre + txt.substring(0, cut), x, y, maxW, font, color);
+      fitText(pre + txt.substring(cut + 1), x, y + lineH, maxW, font, color);
       return 2;
     }
   }
-  fitText(txt, x, y, maxW, font, color);
+  fitText(in, x, y, maxW, font, color);
   return 1;
 }
 
@@ -551,13 +568,13 @@ static void pageMain() {
   } else if (portrait()) {
     // Tall screen: names may take two lines, and each detail gets a line of its own.
     int nameW = W - 70;
-    int n = wrapText(st.system.length() ? st.system : st.mode, 10, y, nameW, 23, &fonts::FreeSans12pt7b, C_SYS);
+    int n = wrapText(S(st.system.length() ? st.system : st.mode), 10, y, nameW, 23, &fonts::FreeSans12pt7b, C_SYS);
     if (st.sysHold) { s_canvas.setFont(&fonts::Font2); s_canvas.setTextColor(C_HOLD); s_canvas.drawString("HOLD", W - 52, y + 4); }
     y += 23 * n + 8;
-    n = wrapText(st.department, 10, y, nameW, 23, &fonts::FreeSans12pt7b, C_DEPT);
+    n = wrapText(S(st.department), 10, y, nameW, 23, &fonts::FreeSans12pt7b, C_DEPT);
     if (st.deptHold) { s_canvas.setFont(&fonts::Font2); s_canvas.setTextColor(C_HOLD); s_canvas.drawString("HOLD", W - 52, y + 4); }
     y += 23 * n + 8;
-    n = wrapText(st.channel.length() ? st.channel : String("Scanning..."), 10, y, nameW, 30, &fonts::FreeSansBold18pt7b,
+    n = wrapText(S(st.channel.length() ? st.channel : String("Scanning...")), 10, y, nameW, 30, &fonts::FreeSansBold18pt7b,
                  st.sig > 0 ? C_TEXT : C_DIM);
     if (st.chanHold) { s_canvas.setFont(&fonts::Font2); s_canvas.setTextColor(C_HOLD); s_canvas.drawString("HOLD", W - 52, y + 8); }
     y += 30 * n + 12;
@@ -565,7 +582,7 @@ static void pageMain() {
     int bottom = WX_TOP - 4;
     auto line = [&](const String& t, const lgfx::IFont* f, uint16_t col, int h) {
       if (!t.length() || y + h > bottom) return;
-      fitText(t, 10, y, W - 20, f, col);
+      fitText(S(t), 10, y, W - 20, f, col);
       y += h + 5;
     };
     String tg = st.tgid; tg.trim();
@@ -581,13 +598,13 @@ static void pageMain() {
     line(sub, &fonts::Font2, C_DIM, 15);
     line(st.info2, &fonts::Font2, C_DIM, 15);
   } else {
-    fitText(st.system.length() ? st.system : st.mode, 10, y, 400, &fonts::FreeSans12pt7b, C_SYS);
+    fitText(S(st.system.length() ? st.system : st.mode), 10, y, 400, &fonts::FreeSans12pt7b, C_SYS);
     if (st.sysHold) { s_canvas.setFont(&fonts::Font2); s_canvas.setTextColor(C_HOLD); s_canvas.drawString("HOLD", 425, y + 4); }
     y += 33;
-    fitText(st.department, 10, y, 400, &fonts::FreeSans12pt7b, C_DEPT);
+    fitText(S(st.department), 10, y, 400, &fonts::FreeSans12pt7b, C_DEPT);
     if (st.deptHold) { s_canvas.setFont(&fonts::Font2); s_canvas.setTextColor(C_HOLD); s_canvas.drawString("HOLD", 425, y + 4); }
     y += 35;
-    fitText(st.channel.length() ? st.channel : String("Scanning..."), 10, y, 400, &fonts::FreeSansBold18pt7b,
+    fitText(S(st.channel.length() ? st.channel : String("Scanning...")), 10, y, 400, &fonts::FreeSansBold18pt7b,
             st.sig > 0 ? C_TEXT : C_DIM);
     if (st.chanHold) { s_canvas.setFont(&fonts::Font2); s_canvas.setTextColor(C_HOLD); s_canvas.drawString("HOLD", 425, y + 10); }
     y += 48;
@@ -600,16 +617,16 @@ static void pageMain() {
     if (st.freq.length()) { String f = st.freq; f.trim(); line += f + "   "; }
     if (st.mod.length()) line += st.mod;
     auto lineW = [](int y, int h) { return (y + h > WX_TOP) ? WX_LEFT - 18 : 460; };
-    fitText(line, 10, y, lineW(y, 26), &fonts::Font4, C_TEXT);
+    fitText(S(line), 10, y, lineW(y, 26), &fonts::Font4, C_TEXT);
     y += 30;
-    if (st.service.length()) { fitText(st.service, 10, y, lineW(y, 26), &fonts::Font4, C_DIM); y += 30; }
+    if (st.service.length()) { fitText(S(st.service), 10, y, lineW(y, 26), &fonts::Font4, C_DIM); y += 30; }
     String sub;
     if (st.site.length()) sub += "Site: " + st.site + "   ";
     String rssi = st.rssi; rssi.trim();
     if (rssi.length() && rssi != "-999") sub += "RSSI " + rssi + "   ";
     if (st.info1.length()) sub += st.info1;
-    if (sub.length()) { fitText(sub, 10, y, lineW(y, 16), &fonts::Font2, C_DIM); y += 20; }
-    if (st.info2.length() && y < 244) fitText(st.info2, 10, y, lineW(y, 16), &fonts::Font2, C_DIM);
+    if (sub.length()) { fitText(S(sub), 10, y, lineW(y, 16), &fonts::Font2, C_DIM); y += 20; }
+    if (st.info2.length() && y < 244) fitText(S(st.info2), 10, y, lineW(y, 16), &fonts::Font2, C_DIM);
   }
 
   add(MCOL(0), MBY, MBW, MBH, "SPK -", A_SPK_DN);
@@ -656,8 +673,8 @@ static void pageKeys() {
   const auto& st = Sds200::status();
   char buf[32];
   snprintf(buf, sizeof(buf), "SPK %d%%%s", AudioOut::volume(), AudioOut::muted() ? " (muted)" : "");
-  if (st.popup.length()) header(st.channel.length() ? st.channel : st.mode, st.popup);
-  else header(st.channel.length() ? st.channel : st.mode, buf);
+  if (st.popup.length()) header(S(st.channel.length() ? st.channel : st.mode), st.popup);
+  else header(S(st.channel.length() ? st.channel : st.mode), buf);
 
   static const char* pad = "123456789.0E";
   struct { const char* l; char k; } right[] = {
@@ -803,7 +820,7 @@ static void pageSettings() {
   String upd = Board::hasLauncher() ? String("via Launcher") : Ota::enabled() ? String(OTA_HOSTNAME) + ".local" : String("off");
   if (tall) {
     int y = infoY;
-    String lines[4] = {wifi, "Scanner: " + Settings::scannerIp(), sd, "Updates: " + upd};
+    String lines[4] = {S(wifi), S("Scanner: " + Settings::scannerIp()), sd, "Updates: " + upd};
     for (const String& l : lines) {
       fitText(l, 12, y, W - 24, &fonts::Font0, C_DIM);
       y += rot ? 13 : 14;
@@ -816,7 +833,7 @@ static void pageSettings() {
     return;
   }
   int y = infoY;
-  fitText(wifi + "   Scanner: " + Settings::scannerIp(), 12, y, 456, &fonts::Font0, C_DIM); y += 12;
+  fitText(S(wifi + "   Scanner: " + Settings::scannerIp()), 12, y, 456, &fonts::Font0, C_DIM); y += 12;
   fitText(sd + "   Updates: " + upd, 12, y, 456, &fonts::Font0, C_DIM);
 
   add(2, 262, 116, 54, "WI-FI SETUP", A_GOTO, PAGE_SETUP);
@@ -850,8 +867,8 @@ static void pageRecent() {
     if (!clockText(t, sizeof(t), c.start)) snprintf(t, sizeof(t), "--:--");
     int tx = portrait() ? 86 : 78;                 // (the time is wider on the narrower scale)
     fitText(t, 8, y + 4, tx - 8, &fonts::Font2, C_DIM);
-    fitText(c.channel.length() ? c.channel : c.tgid, tx, y + 4, W - 82 - tx, &fonts::Font2, C_TEXT);
-    fitText(c.dept.length() ? c.dept : c.system, tx, y + 24, W - 82 - tx, &fonts::Font0, C_DIM);
+    fitText(S(c.channel.length() ? c.channel : c.tgid), tx, y + 4, W - 82 - tx, &fonts::Font2, C_TEXT);
+    fitText(S(c.dept.length() ? c.dept : c.system), tx, y + 24, W - 82 - tx, &fonts::Font0, C_DIM);
     char d[16];
     snprintf(d, sizeof(d), "%lus", (unsigned long)((c.durMs + 500) / 1000));
     fitText(d, W - 76, y + 4, 40, &fonts::Font2, C_DIM);
@@ -879,8 +896,8 @@ static void pageFavs() {
     drawButton(s_btns.back(), false);
     const auto& f = c.favs[i];
     if (f.used) {
-      fitText(strlen(f.dept) ? f.dept : f.sys, x + 10, y + 10, tw, &fonts::Font2, C_TEXT);
-      fitText(strlen(f.dept) ? f.sys : "(whole system)", x + 10, y + y2, tw, &fonts::Font2, C_DIM);
+      fitText(S(strlen(f.dept) ? f.dept : f.sys), x + 10, y + 10, tw, &fonts::Font2, C_TEXT);
+      fitText(strlen(f.dept) ? S(f.sys) : String("(whole system)"), x + 10, y + y2, tw, &fonts::Font2, C_DIM);
     } else {
       fitText(String("Slot ") + (i + 1) + " - empty", x + 10, y + 10, tw, &fonts::Font2, C_DIM);
       fitText("hold to save current", x + 10, y + y2, tw, &fonts::Font2, C_DIM);
@@ -1582,7 +1599,7 @@ void showMessage(const char* line1, const char* line2) {
 }
 
 // Serial debug helper: "S" sends a screenshot, "P<n>" shows page n, "B" beeps, "L" shows the boot
-// logo, "O<n>" fixes the Tab5's picture at n quarter turns (0 landscape, 1 / 3 portrait; "O9" = automatic). Used for checking layouts from a computer.
+// logo, "R" toggles redaction (screenshots), "O<n>" fixes the Tab5's picture at n quarter turns (0 landscape, 1 / 3 portrait; "O9" = automatic). Used for checking layouts from a computer.
 static void serialDebug() {
   if (!Serial.available()) return;
   int c = Serial.read();
@@ -1610,6 +1627,10 @@ static void serialDebug() {
     AudioOut::chime(true);
   } else if (c == 'L') {                          // show the boot logo (checking colours)
     showLogo("logo test");
+  } else if (c == 'R') {                          // redaction on / off (for screenshots)
+    s_redact = !s_redact;
+    s_regionsValid = false;
+    s_dirty = true;
   } else if (c == 'O') {
     uint32_t t = millis();
     while (!Serial.available() && millis() - t < 200) delay(1);

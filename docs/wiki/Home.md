@@ -28,6 +28,7 @@ Welcome to the uniden-connect wiki!
 12. [Troubleshooting](#12-troubleshooting)
 13. [Known limitations](#13-known-limitations)
 14. [References](#14-references)
+15. [Screenshots](#15-screenshots)
 
 ---
 
@@ -613,6 +614,7 @@ The console also accepts these debug inputs:
 - `B` plays the volume chime.
 - `O<n>` fixes the Tab5 picture at *n* quarter turns (0 landscape, 1 / 3 portrait, 2 upside down); `O9` returns to automatic.
 - `L` shows the boot logo.
+- `R` turns redaction on / off: channel names, talkgroups, frequencies, the Wi-Fi name and IP addresses are drawn as grey bars (for screenshots to share).
 
 ---
 
@@ -671,3 +673,32 @@ The console also accepts these debug inputs:
 9. Espressif, *Arduino-ESP32* releases (esp32p4_es libraries), https://github.com/espressif/arduino-esp32/releases
 10. bmorcelli, *Launcher*, https://github.com/bmorcelli/Launcher
 
+---
+
+## 15. Screenshots
+
+Taken from a running FNK0104N (3.5", 480 x 320) with firmware v2.2.0, using the serial `S` command.
+Local channel names, talkgroups, frequencies, the Wi-Fi network name and IP addresses are covered
+with grey bars (serial `R`). The Tab5 shows the same layouts at 1280 x 720 with larger, smooth fonts.
+
+### 15.1 Landscape
+
+| | |
+|---|---|
+| **Main** | **KEYS** |
+| ![Main, landscape](images/fnk0104n-landscape-main.png) | ![KEYS, landscape](images/fnk0104n-landscape-keys.png) |
+| **SETTINGS** | **RECENT** |
+| ![SETTINGS, landscape](images/fnk0104n-landscape-settings.png) | ![RECENT, landscape](images/fnk0104n-landscape-recent.png) |
+| **FAVS** | **Power menu** |
+| ![FAVS, landscape](images/fnk0104n-landscape-favorites.png) | ![Power menu, landscape](images/fnk0104n-landscape-power.png) |
+| **On-screen keyboard** |  |
+| ![On-screen keyboard, landscape](images/fnk0104n-landscape-keyboard.png) |  |
+
+### 15.2 Portrait (SETTINGS > Screen rotation)
+
+| | | | |
+|---|---|---|---|
+| **Main** | **KEYS** | **SETTINGS** | **RECENT** |
+| ![Main, portrait](images/fnk0104n-portrait-main.png) | ![KEYS, portrait](images/fnk0104n-portrait-keys.png) | ![SETTINGS, portrait](images/fnk0104n-portrait-settings.png) | ![RECENT, portrait](images/fnk0104n-portrait-recent.png) |
+| **FAVS** | **Power menu** | **On-screen keyboard** |  |
+| ![FAVS, portrait](images/fnk0104n-portrait-favorites.png) | ![Power menu, portrait](images/fnk0104n-portrait-power.png) | ![On-screen keyboard, portrait](images/fnk0104n-portrait-keyboard.png) |  |
