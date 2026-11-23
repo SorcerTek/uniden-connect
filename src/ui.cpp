@@ -17,7 +17,9 @@
 
 namespace Ui {
 
-static const int W = 480, H = 320;
+// Logical screen: 480x320 in landscape, 320x480 in portrait (Tab5 held upright).
+static int W = 480, H = 320;
+static bool portrait() { return W < H; }
 
 // Boot logo and animation, built into the firmware (see tools/make_boot_assets.sh).
 extern const uint8_t kLogoStart[] asm("_binary_data_boot_logo_jpg_start");
@@ -303,6 +305,26 @@ static void centerText(const String& t, int x, int y, const lgfx::IFont* font, u
   s_canvas.setTextDatum(textdatum_t::top_left);
 }
 
+// Like fitText, but a name too long for one line breaks at a space onto a second line.
+// Returns the number of lines used.
+static int wrapText(const String& txt, int x, int y, int maxW, int lineH, const lgfx::IFont* font, uint16_t color) {
+  s_canvas.setFont(font);
+  if (s_canvas.textWidth(txt.c_str()) > maxW) {
+    int cut = -1;
+    for (int i = txt.indexOf(' '); i > 0; i = txt.indexOf(' ', i + 1)) {
+      if (s_canvas.textWidth(txt.substring(0, i).c_str()) > maxW) break;
+      cut = i;
+    }
+    if (cut > 0) {
+      fitText(txt.substring(0, cut), x, y, maxW, font, color);
+      fitText(txt.substring(cut + 1), x, y + lineH, maxW, font, color);
+      return 2;
+    }
+  }
+  fitText(txt, x, y, maxW, font, color);
+  return 1;
+}
+
 // Scanner-style key: raised charcoal body with a bevel, backlit label with a halo,
 // a faint light leak around the edge. Pressed = pushed in and lit up. Active = LED bar.
 static const uint16_t K_RIM = 0x0841, K_BODY = 0x2104, K_TOP = 0x2945, K_HI = 0x4208, K_SH = 0x0000;
@@ -378,7 +400,7 @@ static void drawButtonNow(const Button& b, bool down) {
   String label = armed ? (b.w > 200 ? String("TAP AGAIN TO REBOOT") : String("TAP AGAIN")) : b.label;
   int cx = x + w / 2, cy = y + h / 2 + (b.hl ? 2 : 0);
   s_canvas.setFont(label.length() == 1 ? (const lgfx::IFont*)&fonts::Font4 : (const lgfx::IFont*)&fonts::Font2);   // big digits / + -
-  if (s_canvas.textWidth(label.c_str()) > w - 8) s_canvas.setFont(&fonts::Font0);   // small keys
+  if (s_canvas.textWidth(label.c_str()) > w - (label.length() == 1 ? 2 : 8)) s_canvas.setFont(&fonts::Font0);   // small keys
   s_canvas.setTextDatum(textdatum_t::middle_center);
   uint16_t halo = (b.hl || down) ? g.mid : g.dim;
   s_canvas.setTextColor(halo);
@@ -446,11 +468,12 @@ static void drawStatusBar() {
   String left = (st.online && clockText(clk, sizeof(clk))) ? String(clk) : (st.model.length() ? st.model : String("SDS200"));
   s_canvas.setTextColor(C_TEXT);
   s_canvas.drawString(left.c_str(), 20, 4);
+  int ax = max(100, 20 + s_canvas.textWidth(left.c_str()) + 10);   // audio dot after the clock
 
   // audio link
   bool audio = AudioOut::playing();
   uint16_t ac = RtspAudio::connected() ? (audio ? C_OK : C_DIM) : C_BAD;
-  s_canvas.fillCircle(100, 12, 5, ac);
+  s_canvas.fillCircle(ax, 12, 5, ac);
   String a = Calls::replaying() ? String("replay") : AudioOut::muted() ? String("muted") : String(RtspAudio::status());
 
   // board speaker volume (right-aligned), REC to its left while recording
@@ -471,7 +494,8 @@ static void drawStatusBar() {
   }
   int right = W - 128;
   s_canvas.setFont(spkFont);
-  int levelsLeft = right - s_canvas.textWidth(buf);
+  // (portrait: no room for the speaker level here; the main page shows it instead)
+  int levelsLeft = portrait() ? right + 2 : right - s_canvas.textWidth(buf);
   int textEnd = levelsLeft - 8;
   if (Calls::recordingNow()) {
     s_canvas.setFont(&fonts::Font2);
@@ -482,12 +506,14 @@ static void drawStatusBar() {
     s_canvas.drawString("REC", rx + 13, 4);
     textEnd = rx - 6;
   }
-  fitText(a, 110, 4, textEnd - 110, &fonts::Font2, C_DIM);
-  s_canvas.setFont(spkFont);
-  s_canvas.setTextColor(C_TEXT);
-  s_canvas.setTextDatum(textdatum_t::top_right);
-  s_canvas.drawString(buf, right, spkY);
-  s_canvas.setTextDatum(textdatum_t::top_left);
+  if (textEnd - (ax + 10) > 20) fitText(a, ax + 10, 4, textEnd - (ax + 10), &fonts::Font2, C_DIM);
+  if (!portrait()) {
+    s_canvas.setFont(spkFont);
+    s_canvas.setTextColor(C_TEXT);
+    s_canvas.setTextDatum(textdatum_t::top_right);
+    s_canvas.drawString(buf, right, spkY);
+    s_canvas.setTextDatum(textdatum_t::top_left);
+  }
 
   drawBattery(W - 104, 6);
 
@@ -500,9 +526,11 @@ static void drawStatusBar() {
 }
 
 // Main page: one row along the bottom plus SCAN / WX above MUTE / KEYS.
-static const int MBY = 264, MBH = 54, MBW = 116, MBG = 4;
+// (landscape: MBY 264, MBW 116; set for the current orientation by setLayout())
+static const int MBH = 54, MBG = 4;
+static int MBY = 264, MBW = 116;
 #define MCOL(i) (2 + (i) * (MBW + MBG))
-static const int WX_TOP = MBY - MBH - MBG, WX_LEFT = MCOL(2);
+static int WX_TOP = MBY - MBH - MBG, WX_LEFT = MCOL(2);
 
 static void pageMain() {
   const auto& st = Sds200::status();
@@ -520,6 +548,38 @@ static void pageMain() {
     String w = String("Wi-Fi: ") + (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("not connected"));
     s_canvas.drawString(w.c_str(), 10, 120);
     s_canvas.drawString("Scanner IP / Wi-Fi: KEYS > SETTINGS > WI-FI SETUP", 10, 140);
+  } else if (portrait()) {
+    // Tall screen: names may take two lines, and each detail gets a line of its own.
+    int nameW = W - 70;
+    int n = wrapText(st.system.length() ? st.system : st.mode, 10, y, nameW, 23, &fonts::FreeSans12pt7b, C_SYS);
+    if (st.sysHold) { s_canvas.setFont(&fonts::Font2); s_canvas.setTextColor(C_HOLD); s_canvas.drawString("HOLD", W - 52, y + 4); }
+    y += 23 * n + 8;
+    n = wrapText(st.department, 10, y, nameW, 23, &fonts::FreeSans12pt7b, C_DEPT);
+    if (st.deptHold) { s_canvas.setFont(&fonts::Font2); s_canvas.setTextColor(C_HOLD); s_canvas.drawString("HOLD", W - 52, y + 4); }
+    y += 23 * n + 8;
+    n = wrapText(st.channel.length() ? st.channel : String("Scanning..."), 10, y, nameW, 30, &fonts::FreeSansBold18pt7b,
+                 st.sig > 0 ? C_TEXT : C_DIM);
+    if (st.chanHold) { s_canvas.setFont(&fonts::Font2); s_canvas.setTextColor(C_HOLD); s_canvas.drawString("HOLD", W - 52, y + 8); }
+    y += 30 * n + 12;
+
+    int bottom = WX_TOP - 4;
+    auto line = [&](const String& t, const lgfx::IFont* f, uint16_t col, int h) {
+      if (!t.length() || y + h > bottom) return;
+      fitText(t, 10, y, W - 20, f, col);
+      y += h + 5;
+    };
+    String tg = st.tgid; tg.trim();
+    if (tg.length() && tg.indexOf("None") < 0 && tg.indexOf("---") < 0) line(tg, &fonts::Font4, C_TEXT, 21);
+    String f = st.freq; f.trim();
+    line(f.length() && st.mod.length() ? f + "   " + st.mod : f + st.mod, &fonts::Font4, C_TEXT, 21);
+    line(st.service, &fonts::Font4, C_DIM, 21);
+    if (st.site.length()) line("Site: " + st.site, &fonts::Font2, C_DIM, 15);
+    String rssi = st.rssi; rssi.trim();
+    String sub;
+    if (rssi.length() && rssi != "-999") sub += "RSSI " + rssi + "   ";
+    sub += st.info1;
+    line(sub, &fonts::Font2, C_DIM, 15);
+    line(st.info2, &fonts::Font2, C_DIM, 15);
   } else {
     fitText(st.system.length() ? st.system : st.mode, 10, y, 400, &fonts::FreeSans12pt7b, C_SYS);
     if (st.sysHold) { s_canvas.setFont(&fonts::Font2); s_canvas.setTextColor(C_HOLD); s_canvas.drawString("HOLD", 425, y + 4); }
@@ -558,14 +618,20 @@ static void pageMain() {
   add(MCOL(3), MBY, MBW, MBH, "KEYS", A_GOTO, PAGE_KEYS);
   add(MCOL(2), WX_TOP, MBW, MBH, "SCAN", A_SCAN, 0, st.online && !Sds200::inWeather());
   if (RtspAudio::lockedOut() && st.online)   // scanner answers but refuses audio: old listener stuck
-    add(MCOL(0), WX_TOP, 2 * MBW + MBG, MBH, rebootArmed() ? "TAP AGAIN TO REBOOT" : "AUDIO STUCK: REBOOT SCANNER", A_REBOOT, 0, false, C_DARKRED);
+    add(MCOL(0), WX_TOP, 2 * MBW + MBG, MBH, rebootArmed() ? "TAP AGAIN TO REBOOT"
+                                              : portrait() ? "STUCK: REBOOT SCANNER" : "AUDIO STUCK: REBOOT SCANNER",
+        A_REBOOT, 0, false, C_DARKRED);
   add(MCOL(3), WX_TOP, MBW, MBH, "WX", A_WX, 0, st.online && Sds200::inWeather());
+  if (portrait() && !(RtspAudio::lockedOut() && st.online))   // the speaker level (no room in the top bar)
+    centerText(AudioOut::muted() ? String("Speaker muted") : "Speaker " + String(AudioOut::volume()) + "%",
+               MCOL(1) - MBG / 2, WX_TOP + MBH / 2, &fonts::Font2, AudioOut::muted() ? C_HOLD : C_DIM);
 
   if (st.popup.length()) {
-    s_canvas.fillRoundRect(60, 70, 360, 90, 10, C_PANEL);
-    s_canvas.drawRoundRect(60, 70, 360, 90, 10, C_DEPT);
-    centerText(st.popup, 240, 105, &fonts::FreeSans12pt7b, C_TEXT);
-    centerText("KEYS page: E/YES to accept", 240, 140, &fonts::Font2, C_DIM);
+    int pw = min(360, W - 20), px = (W - pw) / 2;
+    s_canvas.fillRoundRect(px, 70, pw, 90, 10, C_PANEL);
+    s_canvas.drawRoundRect(px, 70, pw, 90, 10, C_DEPT);
+    centerText(st.popup, W / 2, 105, &fonts::FreeSans12pt7b, C_TEXT);
+    centerText("KEYS page: E/YES to accept", W / 2, 140, &fonts::Font2, C_DIM);
   }
 }
 
@@ -576,8 +642,13 @@ static const int KW = 76, KH = 55, KG = 3, KY = 28;
 
 static void header(const String& title, const String& right = "") {
   s_canvas.fillRect(0, 0, W, 26, C_PANEL);
-  fitText(title, 6, 5, right.length() ? 250 : 400, &fonts::Font2, C_TEXT);
-  if (right.length()) fitText(right, 262, 5, 150, &fonts::Font2, C_DIM);
+  if (portrait()) {
+    fitText(title, 6, 5, right.length() ? 112 : W - 70, &fonts::Font2, C_TEXT);
+    if (right.length()) fitText(right, 124, 5, W - 186, &fonts::Font2, C_DIM);
+  } else {
+    fitText(title, 6, 5, right.length() ? 250 : 400, &fonts::Font2, C_TEXT);
+    if (right.length()) fitText(right, 262, 5, 150, &fonts::Font2, C_DIM);
+  }
   drawBattery(W - 56, 7);
 }
 
@@ -589,19 +660,41 @@ static void pageKeys() {
   else header(st.channel.length() ? st.channel : st.mode, buf);
 
   static const char* pad = "123456789.0E";
-  for (int i = 0; i < 12; i++) {
-    char k = pad[i];
-    add(KX(i % 3), KYR(i / 3), KW, KH, k == 'E' ? String("E/YES") : String(k), A_KEY, k);
-  }
   struct { const char* l; char k; } right[] = {
     {"SYSTEM", 'A'}, {"DEPT", 'B'}, {"CHAN", 'C'}, {"<", '<'}, {"PUSH", '^'}, {">", '>'},
     {"MENU", 'M'}, {"FUNC", 'F'}, {"AVOID", 'L'}, {"ZIP", 'Z'}, {"RANGE", 'R'}, {"REPLAY", 'Y'},
   };
+  bool rec = Settings::get().record;
+  if (portrait()) {
+    // Three columns: scanner function keys, then the number pad, then this app's keys.
+    const int g = 3, kw = (W - 4 - 2 * g) / 3, gap = 6;
+    const int kh = (H - 30 - 9 * g - 2 * gap) / 10;
+    auto px = [&](int c) { return 2 + c * (kw + g); };
+    auto py = [&](int r) { return 30 + r * (kh + g) + (r >= 4 ? gap : 0) + (r >= 8 ? gap : 0); };
+    for (int i = 0; i < 12; i++) {
+      bool hl = (right[i].k == 'A' && st.sysHold) || (right[i].k == 'B' && st.deptHold) || (right[i].k == 'C' && st.chanHold);
+      add(px(i % 3), py(i / 3), kw, kh, right[i].l, A_KEY, right[i].k, hl);
+    }
+    for (int i = 0; i < 12; i++) {
+      char k = pad[i];
+      add(px(i % 3), py(4 + i / 3), kw, kh, k == 'E' ? String("E/YES") : String(k), A_KEY, k);
+    }
+    add(px(0), py(8), kw, kh, rec ? "REC ON" : "REC OFF", A_REC, 0, rec, rec ? C_DARKRED : C_BTN);
+    add(px(1), py(8), kw, kh, "RECENT", A_GOTO, PAGE_RECENT);
+    add(px(2), py(8), kw, kh, "FAVS", A_GOTO, PAGE_FAVS);
+    add(px(0), py(9), kw, kh, "SETTINGS", A_GOTO, PAGE_SETTINGS);
+    add(px(1), py(9), kw, kh, "POWER", A_POWER_MENU);
+    add(px(2), py(9), kw, kh, "BACK", A_GOTO, PAGE_MAIN);
+    return;
+  }
+  for (int i = 0; i < 12; i++) {
+    char k = pad[i];
+    add(KX(i % 3), KYR(i / 3), KW, KH, k == 'E' ? String("E/YES") : String(k), A_KEY, k);
+  }
   for (int i = 0; i < 12; i++) {
     bool hl = (right[i].k == 'A' && st.sysHold) || (right[i].k == 'B' && st.deptHold) || (right[i].k == 'C' && st.chanHold);
     add(KX(3 + i % 3), KYR(i / 3), KW, KH, right[i].l, A_KEY, right[i].k, hl);
   }
-  bool rec = Settings::get().record;
   add(KX(0), KYR(4), KW, KH, rec ? "REC ON" : "REC OFF", A_REC, 0, rec, rec ? C_DARKRED : C_BTN);
   add(KX(1), KYR(4), KW, KH, "RECENT", A_GOTO, PAGE_RECENT);
   add(KX(2), KYR(4), KW, KH, "FAVS", A_GOTO, PAGE_FAVS);
@@ -613,9 +706,22 @@ static void pageKeys() {
 // ---------- POWER ----------
 static void pagePower() {
   centerText("Power", W / 2, 50, &fonts::FreeSansBold18pt7b, C_TEXT);
-  centerText(Board::hasBootButton() ? "After POWER OFF, press BOOT to turn it back on"
-                                    : "After POWER OFF, press the power button to turn it back on",
-             W / 2, 85, &fonts::Font2, C_DIM);
+  const char* how = Board::hasBootButton() ? "press BOOT" : "press the power button";
+  if (portrait()) {
+    centerText(Board::hasBootButton() ? "After POWER OFF, press" : "After POWER OFF, press the", W / 2, 85, &fonts::Font2, C_DIM);
+    centerText(Board::hasBootButton() ? "BOOT to turn it back on" : "power button to turn it back on", W / 2, 103, &fonts::Font2, C_DIM);
+    int bw = (W - 20) / 2;
+    add(8, 130, bw, 120, "POWER OFF", A_POWER_OFF, 0, false, C_BAD);
+    add(12 + bw, 130, bw, 120, "RESTART", A_RESTART);
+    if (Board::hasLauncher()) {
+      add(8, 258, bw, 120, "LAUNCHER", A_LAUNCHER);
+      add(12 + bw, 258, bw, 120, "CANCEL", A_POWER_CANCEL);
+    } else {
+      add(8, 258, W - 16, 120, "CANCEL", A_POWER_CANCEL);
+    }
+    return;
+  }
+  centerText(String("After POWER OFF, ") + how + " to turn it back on", W / 2, 85, &fonts::Font2, C_DIM);
   if (Board::hasLauncher()) {
     add(8, 120, 110, 120, "POWER OFF", A_POWER_OFF, 0, false, C_BAD);
     add(126, 120, 110, 120, "RESTART", A_RESTART);
@@ -644,28 +750,54 @@ static void pageSettings() {
   struct { const char* label; String value; } rows[] = {
     {"Brightness", String(c.brightness) + "%"},
     {"Dim after", dimAfterText(c.dimAfterS)},
-    {"Dimmed level", c.dimLevel ? String(c.dimLevel) + "%" : String("Off")},
+    {portrait() ? "Dim level" : "Dimmed level", c.dimLevel ? String(c.dimLevel) + "%" : String("Off")},
   };
+  bool tall = portrait();
   for (int r = 0; r < 3; r++) {
     int y = 30 + r * 46;
-    fitText(rows[r].label, 12, y + 10, 220, &fonts::Font4, C_TEXT);
-    add(250, y, 60, 42, "-", A_ADJ, r * 2);
-    centerText(rows[r].value, 355, y + 21, &fonts::Font4, C_DEPT);
-    add(400, y, 60, 42, "+", A_ADJ, r * 2 + 1);
+    if (tall) {
+      fitText(rows[r].label, 10, y + 13, 118, &fonts::Font2, C_TEXT);
+      add(130, y, 50, 42, "-", A_ADJ, r * 2);
+      centerText(rows[r].value, (180 + W - 52) / 2, y + 21, &fonts::Font4, C_DEPT);
+      add(W - 52, y, 50, 42, "+", A_ADJ, r * 2 + 1);
+    } else {
+      fitText(rows[r].label, 12, y + 10, 220, &fonts::Font4, C_TEXT);
+      add(250, y, 60, 42, "-", A_ADJ, r * 2);
+      centerText(rows[r].value, 355, y + 21, &fonts::Font4, C_DEPT);
+      add(400, y, 60, 42, "+", A_ADJ, r * 2 + 1);
+    }
   }
 
   // Key light: sample keys, tap one to use it
   fitText("Key light", 12, 170, 200, &fonts::Font2, C_TEXT);
-  fitText(kKeyLights[Settings::keyColor()].name, 90, 170, 200, &fonts::Font2, s_glow[Settings::keyColor()].full);
-  for (int i = 0; i < NUM_KEYLIGHTS; i++)
-    add(2 + i * 48, 188, 44, 40, kKeyLights[i].name, A_KEYLIGHT, i, i == Settings::keyColor(), C_BTN, i);
+  s_canvas.setFont(&fonts::Font2);
+  int kx = max(90, 12 + s_canvas.textWidth("Key light") + 10);
+  fitText(kKeyLights[Settings::keyColor()].name, kx, 170, 200, &fonts::Font2, s_glow[Settings::keyColor()].full);
+  for (int i = 0; i < NUM_KEYLIGHTS; i++) {
+    if (tall) add(2 + (i % 5) * 63, 188 + (i / 5) * 44, 60, 40, kKeyLights[i].name, A_KEYLIGHT, i, i == Settings::keyColor(), C_BTN, i);
+    else add(2 + i * 48, 188, 44, 40, kKeyLights[i].name, A_KEYLIGHT, i, i == Settings::keyColor(), C_BTN, i);
+  }
 
-  int y = 232;
   String wifi = WiFi.status() == WL_CONNECTED ? "Wi-Fi: " + WiFi.SSID() + "  IP " + WiFi.localIP().toString()
                                               : String("Wi-Fi: not connected");
-  fitText(wifi + "   Scanner: " + Settings::scannerIp(), 12, y, 456, &fonts::Font0, C_DIM); y += 12;
   String sd = Calls::sdInfo() + (Calls::sdOk() ? (Settings::get().record ? ", recording on" : ", recording off") : String(""));
   String upd = Board::hasLauncher() ? String("via Launcher") : Ota::enabled() ? String(OTA_HOSTNAME) + ".local" : String("off");
+  if (tall) {
+    int y = 280;
+    String lines[4] = {wifi, "Scanner: " + Settings::scannerIp(), sd, "Updates: " + upd};
+    for (const String& l : lines) {
+      fitText(l, 12, y, W - 24, &fonts::Font0, C_DIM);
+      y += 14;
+    }
+    int bw = (W - 6) / 2;
+    add(2, H - 116, bw, 54, "WI-FI SETUP", A_GOTO, PAGE_SETUP);
+    add(4 + bw, H - 116, bw, 54, "RECONNECT AUDIO", A_AUDIO_RECONNECT);
+    add(2, H - 58, bw, 54, "REBOOT SCANNER", A_REBOOT);
+    add(4 + bw, H - 58, bw, 54, "BACK", A_GOTO, PAGE_KEYS);
+    return;
+  }
+  int y = 232;
+  fitText(wifi + "   Scanner: " + Settings::scannerIp(), 12, y, 456, &fonts::Font0, C_DIM); y += 12;
   fitText(sd + "   Updates: " + upd, 12, y, 456, &fonts::Font0, C_DIM);
 
   add(2, 262, 116, 54, "WI-FI SETUP", A_GOTO, PAGE_SETUP);
@@ -675,7 +807,12 @@ static void pageSettings() {
 }
 
 // ---------- RECENT ----------
-static const int ROWS = 5, ROW_H = 44, ROW_Y = 30;
+static const int ROW_H = 44, ROW_Y = 30;
+static int ROWS = 5;                    // list rows on screen (set by setLayout())
+
+// A row of n equal buttons across the bottom of the screen (or at y).
+static int bottomW(int n) { return (W - 4 - (n - 1) * 4) / n; }
+static int bottomX(int n, int i) { return 2 + i * (bottomW(n) + 4); }
 
 static void pageRecent() {
   int n = Calls::recentCount();
@@ -688,46 +825,50 @@ static void pageRecent() {
     Calls::Call c;
     if (!Calls::recent(i, c)) break;
     int y = ROW_Y + r * (ROW_H + 2);
-    add(2, y, 476, ROW_H, "", A_RECENT_ROW, i, i == s_playingRow);
+    add(2, y, W - 4, ROW_H, "", A_RECENT_ROW, i, i == s_playingRow);
     drawButton(s_btns.back(), false);
     char t[16] = "";
     if (!clockText(t, sizeof(t), c.start)) snprintf(t, sizeof(t), "--:--");
-    fitText(t, 8, y + 4, 70, &fonts::Font2, C_DIM);
-    fitText(c.channel.length() ? c.channel : c.tgid, 78, y + 4, 320, &fonts::Font2, C_TEXT);
-    fitText(c.dept.length() ? c.dept : c.system, 78, y + 24, 320, &fonts::Font0, C_DIM);
+    int tx = portrait() ? 86 : 78;                 // (the time is wider on the narrower scale)
+    fitText(t, 8, y + 4, tx - 8, &fonts::Font2, C_DIM);
+    fitText(c.channel.length() ? c.channel : c.tgid, tx, y + 4, W - 82 - tx, &fonts::Font2, C_TEXT);
+    fitText(c.dept.length() ? c.dept : c.system, tx, y + 24, W - 82 - tx, &fonts::Font0, C_DIM);
     char d[16];
     snprintf(d, sizeof(d), "%lus", (unsigned long)((c.durMs + 500) / 1000));
-    fitText(d, 404, y + 4, 40, &fonts::Font2, C_DIM);
+    fitText(d, W - 76, y + 4, 40, &fonts::Font2, C_DIM);
     if (c.wav.length()) {
-      if (i == s_playingRow) s_canvas.fillRect(450, y + 14, 14, 14, C_OK);
-      else s_canvas.fillTriangle(450, y + 12, 450, y + 32, 466, y + 22, C_OK);
+      if (i == s_playingRow) s_canvas.fillRect(W - 30, y + 14, 14, 14, C_OK);
+      else s_canvas.fillTriangle(W - 30, y + 12, W - 30, y + 32, W - 14, y + 22, C_OK);
     }
   }
-  add(2, 264, 116, 54, "UP", A_LIST_UP);
-  add(122, 264, 116, 54, "DOWN", A_LIST_DN);
-  add(242, 264, 116, 54, "STOP", A_STOP_PLAY, 0, Calls::replaying());
-  add(362, 264, 116, 54, "BACK", A_GOTO, PAGE_KEYS);
+  add(bottomX(4, 0), H - 56, bottomW(4), 54, "UP", A_LIST_UP);
+  add(bottomX(4, 1), H - 56, bottomW(4), 54, "DOWN", A_LIST_DN);
+  add(bottomX(4, 2), H - 56, bottomW(4), 54, "STOP", A_STOP_PLAY, 0, Calls::replaying());
+  add(bottomX(4, 3), H - 56, bottomW(4), 54, "BACK", A_GOTO, PAGE_KEYS);
 }
 
 // ---------- FAVS ----------
 static void pageFavs() {
-  header("Favorites: tap = hold there, hold 1 s = save current");
+  if (portrait()) header("Favorites", "hold = save");
+  else header("Favorites: tap = hold there, hold 1 s = save current");
   const auto& c = Settings::get();
+  bool tall = portrait();
   for (int i = 0; i < Settings::NUM_FAVS; i++) {
-    int x = 2 + (i % 2) * 240, y = 30 + (i / 2) * 76;
-    add(x, y, 236, 72, "", A_FAV, i);
+    int x = tall ? 2 : 2 + (i % 2) * 240, y = tall ? 30 + i * 64 : 30 + (i / 2) * 76;
+    int w = tall ? W - 4 : 236, h = tall ? 60 : 72, tw = w - 20, y2 = tall ? 34 : 40;
+    add(x, y, w, h, "", A_FAV, i);
     drawButton(s_btns.back(), false);
     const auto& f = c.favs[i];
     if (f.used) {
-      fitText(strlen(f.dept) ? f.dept : f.sys, x + 10, y + 12, 216, &fonts::Font2, C_TEXT);
-      fitText(strlen(f.dept) ? f.sys : "(whole system)", x + 10, y + 40, 216, &fonts::Font2, C_DIM);
+      fitText(strlen(f.dept) ? f.dept : f.sys, x + 10, y + 10, tw, &fonts::Font2, C_TEXT);
+      fitText(strlen(f.dept) ? f.sys : "(whole system)", x + 10, y + y2, tw, &fonts::Font2, C_DIM);
     } else {
-      fitText(String("Slot ") + (i + 1) + " - empty", x + 10, y + 12, 216, &fonts::Font2, C_DIM);
-      fitText("hold to save current", x + 10, y + 40, 216, &fonts::Font2, C_DIM);
+      fitText(String("Slot ") + (i + 1) + " - empty", x + 10, y + 10, tw, &fonts::Font2, C_DIM);
+      fitText("hold to save current", x + 10, y + y2, tw, &fonts::Font2, C_DIM);
     }
   }
-  add(2, 264, 236, 54, "SCAN (release hold)", A_SCAN);
-  add(242, 264, 236, 54, "BACK", A_GOTO, PAGE_KEYS);
+  add(bottomX(2, 0), H - 56, bottomW(2), 54, tall ? "SCAN" : "SCAN (release hold)", A_SCAN);
+  add(bottomX(2, 1), H - 56, bottomW(2), 54, "BACK", A_GOTO, PAGE_KEYS);
 }
 
 // ---------- SETUP ----------
@@ -747,20 +888,32 @@ static void pageSetup() {
     {"Scanner IP", s_eIp},
     {"Update password", s_eOta.length() ? String("********") : String("(off)")},
   };
+  bool tall = portrait();
   for (int r = 0; r < 4; r++) {
-    int y = 32 + r * 48;
-    fitText(rows[r].label, 10, y + 13, 150, &fonts::Font2, C_TEXT);
-    add(160, y, 318, 44, "", A_SETUP_FIELD, r);
+    int y = tall ? 32 + r * 70 : 32 + r * 48;
+    int fx = tall ? 2 : 160, fy = tall ? y + 20 : y;   // portrait: label above its field
+    fitText(rows[r].label, 10, tall ? y : y + 13, 150, &fonts::Font2, C_TEXT);
+    add(fx, fy, W - 2 - fx, 44, "", A_SETUP_FIELD, r);
     drawButton(s_btns.back(), false);
-    fitText(rows[r].value, 172, y + 13, 296, &fonts::Font2, C_DEPT);
+    fitText(rows[r].value, fx + 12, fy + 13, W - 24 - fx, &fonts::Font2, C_DEPT);
   }
-  if (s_setupMsg.length())
-    fitText(s_setupMsg, 10, 232, 460, &fonts::Font2, s_setupMsg.startsWith("Connected") || s_setupMsg.startsWith("Saved") ? C_OK : C_HOLD);
-  else if (WiFi.status() == WL_CONNECTED)
-    fitText("This board: " + WiFi.localIP().toString() + " on \"" + WiFi.SSID() + "\"  (" + String(WiFi.RSSI()) + " dBm)",
-            10, 232, 460, &fonts::Font2, C_DIM);
-  else
-    fitText("This board: not connected to Wi-Fi", 10, 232, 460, &fonts::Font2, C_DIM);
+  int my = tall ? 316 : 232;
+  uint16_t mc = s_setupMsg.startsWith("Connected") || s_setupMsg.startsWith("Saved") ? C_OK : C_HOLD;
+  String msg = s_setupMsg;
+  if (!msg.length()) {
+    mc = C_DIM;
+    msg = WiFi.status() == WL_CONNECTED
+              ? "This board: " + WiFi.localIP().toString() + " on \"" + WiFi.SSID() + "\"  (" + String(WiFi.RSSI()) + " dBm)"
+              : String("This board: not connected to Wi-Fi");
+  }
+  if (tall) wrapText(msg, 10, my, W - 20, 20, &fonts::Font2, mc);
+  else fitText(msg, 10, my, 460, &fonts::Font2, mc);
+  if (tall) {
+    add(2, H - 116, W - 4, 54, "SAVE & CONNECT", A_SAVE_CONNECT, 0, false, C_GREENKEY);
+    add(bottomX(2, 0), H - 58, bottomW(2), 54, "FORGET WI-FI", A_FORGET_WIFI);
+    add(bottomX(2, 1), H - 58, bottomW(2), 54, "BACK", A_GOTO, PAGE_SETTINGS);
+    return;
+  }
   add(2, 262, 200, 54, "SAVE & CONNECT", A_SAVE_CONNECT, 0, false, C_GREENKEY);
   add(206, 262, 150, 54, "FORGET WI-FI", A_FORGET_WIFI);
   add(360, 262, 118, 54, "BACK", A_GOTO, PAGE_SETTINGS);
@@ -783,19 +936,30 @@ static void scanWifi() {
   s_dirty = true;
 }
 
+static int wifiRows() { return portrait() ? ROWS - 1 : ROWS; }   // (portrait has two rows of buttons)
+
 static void pageWifi() {
   header("Choose your Wi-Fi network (2.4 GHz)", String(s_nets.size()) + " found");
   if (s_nets.empty()) centerText("No networks found - tap RESCAN", W / 2, 140, &fonts::Font2, C_DIM);
-  if (s_netTop > max(0, (int)s_nets.size() - ROWS)) s_netTop = max(0, (int)s_nets.size() - ROWS);
-  for (int r = 0; r < ROWS; r++) {
+  int rows = wifiRows();
+  if (s_netTop > max(0, (int)s_nets.size() - rows)) s_netTop = max(0, (int)s_nets.size() - rows);
+  for (int r = 0; r < rows; r++) {
     int i = s_netTop + r;
     if (i >= (int)s_nets.size()) break;
     int y = ROW_Y + r * (ROW_H + 2);
-    add(2, y, 476, ROW_H, "", A_WIFI_PICK, i, s_nets[i].ssid == s_eSsid);
+    add(2, y, W - 4, ROW_H, "", A_WIFI_PICK, i, s_nets[i].ssid == s_eSsid);
     drawButton(s_btns.back(), false);
-    fitText(s_nets[i].ssid, 12, y + 14, 360, &fonts::Font2, C_TEXT);
-    if (!s_nets[i].open) drawLock(410, y + 14);
-    drawWifiBars(436, y + 12, s_nets[i].rssi);
+    fitText(s_nets[i].ssid, 12, y + 14, W - 120, &fonts::Font2, C_TEXT);
+    if (!s_nets[i].open) drawLock(W - 70, y + 14);
+    drawWifiBars(W - 44, y + 12, s_nets[i].rssi);
+  }
+  if (portrait()) {                                // two rows of buttons
+    add(bottomX(3, 0), H - 116, bottomW(3), 54, "UP", A_LIST_UP);
+    add(bottomX(3, 1), H - 116, bottomW(3), 54, "DOWN", A_LIST_DN);
+    add(bottomX(3, 2), H - 116, bottomW(3), 54, "OTHER...", A_WIFI_OTHER);
+    add(bottomX(2, 0), H - 58, bottomW(2), 54, "RESCAN", A_WIFI_RESCAN);
+    add(bottomX(2, 1), H - 58, bottomW(2), 54, "BACK", A_GOTO, PAGE_SETUP);
+    return;
   }
   add(2, 264, 92, 54, "UP", A_LIST_UP);
   add(98, 264, 92, 54, "DOWN", A_LIST_DN);
@@ -832,52 +996,62 @@ static void pageKb() {
   s_canvas.setFont(&fonts::Font2);
   s_canvas.setTextColor(C_DIM);
   s_canvas.drawString(titles[s_kbField], 8, 2);
-  s_canvas.fillRoundRect(4, 20, 472, 32, 6, C_PANEL);
+  s_canvas.fillRoundRect(4, 20, W - 8, 32, 6, C_PANEL);
   String shown = secret ? String() : s_kbText;
   if (secret) for (size_t i = 0; i < s_kbText.length(); i++) shown += '*';
   s_canvas.setFont(&fonts::Font4);
-  while (shown.length() && s_canvas.textWidth(shown.c_str()) > 440) shown.remove(0, 1);
+  while (shown.length() && s_canvas.textWidth(shown.c_str()) > W - 40) shown.remove(0, 1);
   s_canvas.setTextColor(C_TEXT);
   s_canvas.drawString(shown.c_str(), 12, 24);
   int cx = 12 + s_canvas.textWidth(shown.c_str()) + 2;
   s_canvas.fillRect(cx, 24, 2, 24, C_HOLD);
 
-  const int KH2 = 46, R0 = 58, RS = 52;
+  // portrait: narrower but taller keys
+  const bool tall = portrait();
+  const int KH2 = tall ? 64 : 46, R0 = tall ? 70 : 58, RS = tall ? 72 : 52;
   if (s_kbMode == KB_IP) {
     static const char* ip[] = {"123", "456", "789", ".0"};
+    const int pitch = (W - 24) / 3 + 1, kw = pitch - 4;
     for (int r = 0; r < 4; r++)
-      for (int c = 0; ip[r][c]; c++) add(12 + c * 154, R0 + r * RS, 150, KH2, String(ip[r][c]), A_KB_CHAR, ip[r][c]);
-    add(12 + 2 * 154, R0 + 3 * RS, 150, KH2, "DEL", A_KB_BKSP);
+      for (int c = 0; ip[r][c]; c++) add(12 + c * pitch, R0 + r * RS, kw, KH2, String(ip[r][c]), A_KB_CHAR, ip[r][c]);
+    add(12 + 2 * pitch, R0 + 3 * RS, kw, KH2, "DEL", A_KB_BKSP);
   } else {
+    const int pitch = tall ? 31 : 48, kw = pitch - 2;
     for (int r = 0; r < 3; r++) {
       const char* row = kbRows(s_kbMode, r);
       int n = strlen(row);
-      int x0 = (r == 2) ? 74 : (W - n * 48) / 2;
-      for (int c = 0; c < n; c++) add(x0 + c * 48, R0 + r * RS, 46, KH2, String(row[c]), A_KB_CHAR, row[c]);
+      int x0 = (r == 2) ? (tall ? (W - 7 * pitch) / 2 : 74) : (W - n * pitch) / 2;
+      for (int c = 0; c < n; c++) add(x0 + c * pitch, R0 + r * RS, kw, KH2, String(row[c]), A_KB_CHAR, row[c]);
     }
     bool letters = s_kbMode == KB_LOWER || s_kbMode == KB_UPPER;
-    add(2, R0 + 2 * RS, 68, KH2, letters ? "SHIFT" : (s_kbMode == KB_NUM ? "#+=" : "123"), A_KB_SHIFT, 0, s_kbMode == KB_UPPER);
-    add(410, R0 + 2 * RS, 68, KH2, "DEL", A_KB_BKSP);
-    add(2, R0 + 3 * RS, 96, KH2, letters ? "123" : "ABC", A_KB_MODE);
-    add(102, R0 + 3 * RS, 244, KH2, "space", A_KB_CHAR, ' ');
-    if (s_kbField == 1 || s_kbField == 3) add(350, R0 + 3 * RS, 128, KH2, s_kbShow ? "HIDE" : "SHOW", A_KB_SHOW);
+    int sw = tall ? (W - 7 * pitch) / 2 - 6 : 68;   // SHIFT / DEL either side of the last row
+    add(2, R0 + 2 * RS, sw, KH2, letters ? "SHIFT" : (s_kbMode == KB_NUM ? "#+=" : "123"), A_KB_SHIFT, 0, s_kbMode == KB_UPPER);
+    add(W - 2 - sw, R0 + 2 * RS, sw, KH2, "DEL", A_KB_BKSP);
+    bool secretField = s_kbField == 1 || s_kbField == 3;
+    int mw = tall ? 60 : 96, showW = tall ? 70 : 128;
+    int spaceW = W - 2 - (mw + 6) - (secretField ? showW + 4 : 0) - 2;
+    if (!tall && !secretField) spaceW = 244;          // (landscape layout as before)
+    add(2, R0 + 3 * RS, mw, KH2, letters ? "123" : "ABC", A_KB_MODE);
+    add(mw + 6, R0 + 3 * RS, spaceW, KH2, "space", A_KB_CHAR, ' ');
+    if (secretField) add(W - 2 - showW, R0 + 3 * RS, showW, KH2, s_kbShow ? "HIDE" : "SHOW", A_KB_SHOW);
   }
-  add(2, 266, 236, 50, "CANCEL", A_KB_CANCEL);
-  add(242, 266, 236, 50, "OK", A_KB_OK, 0, false, C_GREENKEY);
+  add(bottomX(2, 0), H - 54, bottomW(2), 50, "CANCEL", A_KB_CANCEL);
+  add(bottomX(2, 1), H - 54, bottomW(2), 50, "OK", A_KB_OK, 0, false, C_GREENKEY);
 }
 
 // ---------- weather alert overlay ----------
 static void drawAlert() {
   bool on = (millis() / 500) % 2;
   uint16_t bg = on ? C_BAD : C_DARKRED;
-  s_canvas.fillRoundRect(10, 50, 460, 170, 12, bg);
-  s_canvas.drawRoundRect(10, 50, 460, 170, 12, C_TEXT);
-  centerText("WEATHER ALERT", W / 2, 90, &fonts::FreeSansBold18pt7b, C_TEXT);
+  int oy = (H - 320) / 2;                        // centred on a tall screen
+  s_canvas.fillRoundRect(10, 50 + oy, W - 20, 170, 12, bg);
+  s_canvas.drawRoundRect(10, 50 + oy, W - 20, 170, 12, C_TEXT);
+  centerText("WEATHER ALERT", W / 2, 90 + oy, &fonts::FreeSansBold18pt7b, C_TEXT);
   const auto& st = Sds200::status();
   String f = st.freq; f.trim();
   String l = (st.channel.length() ? st.channel : String("NOAA Weather")) + (f.length() ? "   " + f : String(""));
-  centerText(l, W / 2, 140, &fonts::FreeSans12pt7b, C_TEXT);
-  centerText("Tap anywhere to dismiss", W / 2, 190, &fonts::Font2, C_TEXT);
+  centerText(l, W / 2, 140 + oy, &fonts::FreeSans12pt7b, C_TEXT);
+  centerText("Tap anywhere to dismiss", W / 2, 190 + oy, &fonts::Font2, C_TEXT);
 }
 
 // ---------- redraw ----------
@@ -906,8 +1080,9 @@ static void drawPage() {
   }
   if (alertShowing()) drawAlert();
   if (s_toast.length() && millis() < s_toastUntil) {
-    s_canvas.fillRoundRect(60, 150, 360, 40, 8, C_BTN_DOWN);
-    centerText(s_toast, 240, 170, &fonts::Font4, C_TEXT);
+    int tw = min(360, W - 20), ty = 150 + (H - 320) / 2;
+    s_canvas.fillRoundRect((W - tw) / 2, ty, tw, 40, 8, C_BTN_DOWN);
+    centerText(s_toast, W / 2, ty + 20, &fonts::Font4, C_TEXT);
   }
 }
 
@@ -916,7 +1091,7 @@ static void drawPage() {
 // only regions whose fingerprint changed are cleared, redrawn (clipped) and sent to
 // the screen. Anything else (other pages, pop-ups) redraws the whole screen.
 struct Region { int x, y, w, h; };
-static const Region kMainRegions[3] = {{0, 0, 480, 24}, {0, 24, 480, 238}, {0, 262, 480, 58}};
+static Region kMainRegions[3];   // top bar, information (incl. SCAN / WX row), bottom row: set by setLayout()
 static String s_regionSig[3];
 static bool s_regionsValid = false;
 
@@ -935,7 +1110,8 @@ static String sigInfo() {
   return String(st.online) + "|" + st.system + "|" + st.mode + "|" + st.department + "|" + st.channel + "|" + (st.sig > 0) +
          st.sysHold + st.deptHold + st.chanHold + "|" + st.tgid + "|" + st.freq + "|" + st.mod + "|" + st.service + "|" +
          st.site + "|" + st.rssi + "|" + st.info1 + "|" + st.info2 + "|" + st.popup + "|" + w + "|" + Settings::scannerIp() +
-         RtspAudio::lockedOut() + rebootArmed() + Sds200::inWeather() + "|" + s_pressed + "|" + Settings::keyColor();
+         RtspAudio::lockedOut() + rebootArmed() + Sds200::inWeather() + "|" + s_pressed + "|" + Settings::keyColor() +
+         (portrait() ? "|" + String(AudioOut::volume()) + AudioOut::muted() : String(""));   // portrait shows the level here
 }
 static String sigButtons() { return String(AudioOut::muted()) + "|" + s_pressed + "|" + Settings::keyColor(); }
 
@@ -1114,11 +1290,11 @@ static void doAction(const Button& b, bool longPress) {
     case A_STOP_PLAY: Calls::stopPlay(); s_playingRow = -1; break;
     case A_LIST_UP:
       if (s_page == PAGE_RECENT) s_recentTop = max(0, s_recentTop - ROWS);
-      else s_netTop = max(0, s_netTop - ROWS);
+      else s_netTop = max(0, s_netTop - wifiRows());
       break;
     case A_LIST_DN:
       if (s_page == PAGE_RECENT) s_recentTop += ROWS;
-      else s_netTop += ROWS;
+      else s_netTop += wifiRows();
       break;
     case A_FAV: {
       auto& f = Settings::get().favs[b.arg];
@@ -1244,12 +1420,31 @@ static void handleTouch() {
 }
 
 // ---------- setup ----------
-bool begin() {
-  if (!Board::beginDisplay()) return false;
+// Logical size, scale and the size-dependent layout for the canvas's current shape.
+static void setLayout() {
   LGFX_Sprite& c = Board::canvas();
   s_canvas.c = &c;
+  bool tall = c.height() > c.width();
+  W = tall ? 320 : 480;
+  H = tall ? 480 : 320;
   s_canvas.kx = c.width() / (float)W;
   s_canvas.ky = c.height() / (float)H;
+  MBY = H - MBH - 2;
+  MBW = (W - 4 - 3 * MBG) / 4;
+  WX_TOP = MBY - MBH - MBG;
+  WX_LEFT = MCOL(2);
+  ROWS = (H - 56 - ROW_Y) / (ROW_H + 2);
+  kMainRegions[0] = {0, 0, W, 24};
+  kMainRegions[1] = {0, 24, W, MBY - 2 - 24};
+  kMainRegions[2] = {0, MBY - 2, W, H - (MBY - 2)};
+  for (auto& k : s_keyCache) delete k.img;        // cached keys were drawn at the old scale
+  s_keyCache.clear();
+  s_regionsValid = false;
+}
+
+bool begin() {
+  if (!Board::beginDisplay()) return false;
+  setLayout();
   initGlows();
   s_lastActivity = millis();
   return true;
@@ -1334,19 +1529,20 @@ void showMessage(const char* line1, const char* line2) {
   s_canvas.setTextDatum(textdatum_t::middle_center);
   s_canvas.setFont(&fonts::FreeSansBold18pt7b);
   s_canvas.setTextColor(C_SYS);
-  s_canvas.drawString("Uniden Connect", W / 2, 110);
+  int oy = (H - 320) / 2;
+  s_canvas.drawString("Uniden Connect", W / 2, 110 + oy);
   s_canvas.setFont(&fonts::FreeSans12pt7b);
   s_canvas.setTextColor(C_TEXT);
-  if (line1) s_canvas.drawString(line1, W / 2, 170);
+  if (line1) s_canvas.drawString(line1, W / 2, 170 + oy);
   s_canvas.setFont(&fonts::Font2);
   s_canvas.setTextColor(C_DIM);
-  if (line2) s_canvas.drawString(line2, W / 2, 205);
+  if (line2) s_canvas.drawString(line2, W / 2, 205 + oy);
   s_canvas.setTextDatum(textdatum_t::top_left);
   Board::present();
 }
 
 // Serial debug helper: "S" sends a screenshot, "P<n>" shows page n, "B" beeps, "L" shows the boot
-// logo. Used for checking layouts from a computer.
+// logo, "O<n>" fixes the Tab5's picture at n quarter turns (0 landscape, 1 / 3 portrait; "O9" = automatic). Used for checking layouts from a computer.
 static void serialDebug() {
   if (!Serial.available()) return;
   int c = Serial.read();
@@ -1374,6 +1570,10 @@ static void serialDebug() {
     AudioOut::beep(880, 120);
   } else if (c == 'L') {                          // show the boot logo (checking colours)
     showLogo("logo test");
+  } else if (c == 'O') {
+    uint32_t t = millis();
+    while (!Serial.available() && millis() - t < 200) delay(1);
+    Board::setOrientation(Serial.read() - '0');
   } else if (c == 'P') {
     uint32_t t = millis();
     while (!Serial.available() && millis() - t < 200) delay(1);
@@ -1403,7 +1603,7 @@ void loop() {
 
   if (Board::orientationChanged()) {               // the whole picture turned: redraw everything,
     s_pressed = -1;                                // not just the regions whose content changed
-    s_regionsValid = false;
+    setLayout();                                   // (and portrait / landscape may have swapped)
     s_dirty = true;
   }
 

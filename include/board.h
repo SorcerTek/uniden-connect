@@ -33,6 +33,7 @@ void bandsDone();                        // wait until the last band is on scree
 void setBrightness(int pct);    // 0-100
 bool touch(int& x, int& y);     // finger position in canvas pixels; false if not touched
 bool orientationChanged();      // the screen was turned (Tab5 auto-rotate): redraw everything
+void setOrientation(int k);     // Tab5: quarter turns from the normal landscape (serial debug)
 bool hasBootButton();           // BOOT button opens the power menu
 bool hasLauncher();             // installed under bmorcelli's Launcher (offer "exit to Launcher")
 void exitToLauncher();

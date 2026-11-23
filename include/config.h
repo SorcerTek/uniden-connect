@@ -72,7 +72,9 @@
 
 // ---- M5Stack Tab5 (only used by the tab5 build) ------------------
 #define TAB5_ROTATION       3                // 1 or 3: landscape; flip if upside down
-#define TAB5_AUTO_ROTATE    1                // 1 = turn the picture over when the Tab5 is turned over
+#define TAB5_AUTO_ROTATE    1                // 1 = turn the picture with the Tab5 (IMU)
+#define TAB5_PORTRAIT       1                // 1 = switch to the portrait layout when held upright
+#define TAB5_PORTRAIT_SIDE  0                // 0 / 1: swap if portrait comes out upside down
 #define TAB5_FB_CHUNK       4096             // screen writes: bytes per piece ...
 #define TAB5_FB_GAP_US      30               // ... and pause after each (avoids display underruns)
 #define TAB5_SPK_GAIN       12               // speaker / headphone digital gain (M5Unified default 4)

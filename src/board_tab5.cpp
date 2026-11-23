@@ -30,6 +30,10 @@ static M5Canvas* s_canvas = nullptr;
 static uint16_t* s_fb = nullptr;          // the panel's frame buffer (native portrait order)
 static size_t s_fbLen = 0;
 static int s_nativeW = 0, s_nativeH = 0;
+// Where canvas pixel (x, y) sits in the frame buffer: s_base + x * s_dx + y * s_dy
+// (s_dx and s_dy are each +-1 or +-one native row, depending on how the screen is turned).
+static int s_base = 0, s_dx = 1, s_dy = 1;
+// The same for landscape only, as rows / columns (banded drawing and presentHalf()):
 static int s_row0 = 0, s_rowStep = 1;   // canvas x -> frame-buffer row: row0 + x * rowStep
 static int s_col0 = 0, s_colStep = 1;   // canvas y -> frame-buffer column: col0 + y * colStep
 static void setupBands(int rotation);
@@ -72,6 +76,38 @@ template <typename T> static void drawMarkers(T& g) {
   g.drawPixel(0, 1, (uint16_t)0x3456);
 }
 
+// Turn the canvas to match the display's current rotation: draw marker pixels through
+// the display, then find the canvas rotation that puts them in the same places.
+static bool matchRotation() {
+  int want[3], got[3];
+  bool found = false;
+  drawMarkers(M5.Display);
+  M5.Display.display();
+  if (findMarkers(s_fb, s_nativeW, s_nativeH, want)) {
+    for (int r = 0; r < 8 && !found; r++) {
+      s_canvas->setRotation(r);
+      drawMarkers(*s_canvas);
+      if (findMarkers((const uint16_t*)s_canvas->getBuffer(), s_nativeW, s_nativeH, got) &&
+          got[0] == want[0] && got[1] == want[1] && got[2] == want[2]) found = true;
+      for (int m = 0; m < 3; m++) if (got[m] >= 0) ((uint16_t*)s_canvas->getBuffer())[got[m]] = 0;   // erase
+    }
+  }
+  M5.Display.drawPixel(0, 0, TFT_BLACK);     // erase just the markers (a full clear
+  M5.Display.drawPixel(1, 0, TFT_BLACK);     // is a big PSRAM burst that flickers)
+  M5.Display.drawPixel(0, 1, TFT_BLACK);
+  if (!found) return false;
+  s_base = want[0];
+  s_dx = want[1] - want[0];
+  s_dy = want[2] - want[0];
+  if (s_dx == s_nativeW || s_dx == -s_nativeW) {   // landscape: canvas x runs along frame-buffer rows
+    s_row0 = want[0] / s_nativeW;
+    s_rowStep = s_dx > 0 ? 1 : -1;
+    s_col0 = want[0] % s_nativeW;
+    s_colStep = s_dy > 0 ? 1 : -1;
+  }
+  return true;
+}
+
 bool beginDisplay() {
   // Backlight off until the first real frame is on screen: the DSI panel shows garbage
   // and flickers while it starts up (same fix as the AetherScan firmware).
@@ -91,39 +127,15 @@ bool beginDisplay() {
   auto* dsi = (lgfx::Panel_DSI*)M5.Display.getPanel();
   s_fb = dsi ? (uint16_t*)dsi->config_detail().buffer : nullptr;
   s_fbLen = (size_t)s_nativeW * s_nativeH * 2;
-  int want[3], got[3];
-  bool fast = false;
-  if (s_fb) {
-    drawMarkers(M5.Display);
-    M5.Display.display();
-    if (findMarkers(s_fb, s_nativeW, s_nativeH, want)) {
-      for (int r = 0; r < 8 && !fast; r++) {
-        s_canvas->setRotation(r);
-        drawMarkers(*s_canvas);
-        if (findMarkers((const uint16_t*)s_canvas->getBuffer(), s_nativeW, s_nativeH, got) &&
-            got[0] == want[0] && got[1] == want[1] && got[2] == want[2]) fast = true;
-        for (int m = 0; m < 3; m++) if (got[m] >= 0) ((uint16_t*)s_canvas->getBuffer())[got[m]] = 0;   // erase
-      }
-    }
-    M5.Display.drawPixel(0, 0, TFT_BLACK);     // erase just the markers (a full clear
-    M5.Display.drawPixel(1, 0, TFT_BLACK);     // is a big PSRAM burst that flickers)
-    M5.Display.drawPixel(0, 1, TFT_BLACK);
-  }
-  if (!fast) {                            // fall back: landscape canvas, library copy (slow)
+  if (s_fb && !matchRotation()) {         // fall back: canvas the shape of the screen, library copy (slow)
     s_fb = nullptr;
     s_canvas->deleteSprite();
     s_canvas->createSprite(w, h);
     log_w("Tab5: frame buffer mapping not found - using slow screen updates");
   }
-  if (fast) {
-    s_row0 = want[0] / s_nativeW;               // frame-buffer row of canvas x = 0
-    s_rowStep = (want[1] - want[0]) / s_nativeW >= 0 ? 1 : -1;
-    s_col0 = want[0] % s_nativeW;               // frame-buffer column of canvas y = 0
-    s_colStep = (want[2] - want[0]) >= 0 ? 1 : -1;
 #if TAB5_BANDED
-    setupBands(s_canvas->getRotation());
+  if (s_fb) setupBands(s_canvas->getRotation());
 #endif
-  }
   s_canvas->fillScreen(TFT_BLACK);
   log_w("Tab5 display %dx%d, canvas rotation %d, %s updates", s_canvas->width(), s_canvas->height(),
         s_canvas->getRotation(), s_fb ? "fast" : "slow");
@@ -265,6 +277,17 @@ void present() {
 // Used for the boot logo and animation: no canvas, no 1.8 MB copy.
 void presentHalf(LGFX_Sprite& half) {
   if (!s_fb) { half.pushRotateZoom(s_canvas, s_canvas->width() / 2, s_canvas->height() / 2, 0, 2, 2); present(); return; }
+  if (s_canvas->width() < s_canvas->height()) {      // portrait: the image at its own size, centred
+    auto* src = (const uint16_t*)half.getBuffer();
+    auto* cb = (uint16_t*)s_canvas->getBuffer();
+    const int sw = half.width(), sh = half.height();
+    const int ox = (s_canvas->width() - sw) / 2, oy = (s_canvas->height() - sh) / 2;
+    memset(cb, 0, s_fbLen);
+    for (int sy = 0; sy < sh; sy++)
+      for (int sx = 0; sx < sw; sx++) cb[s_base + (ox + sx) * s_dx + (oy + sy) * s_dy] = src[sy * sw + sx];
+    present();
+    return;
+  }
   const int sw = half.width(), sh = half.height();
   auto* src = (const uint16_t*)half.getBuffer();
   static uint16_t* line = nullptr;
@@ -290,10 +313,16 @@ void presentHalf(LGFX_Sprite& half) {
 // Copy one rectangle of the canvas (canvas pixels) to the screen.
 void presentRect(int x, int y, int w, int h) {
   if (!s_fb) { present(); return; }
-  int rA = s_row0 + x * s_rowStep, rB = s_row0 + (x + w - 1) * s_rowStep;
-  int cA = s_col0 + y * s_colStep, cB = s_col0 + (y + h - 1) * s_colStep;
-  int r0 = max(0, min(rA, rB)), r1 = min(s_nativeH - 1, max(rA, rB));
-  int c0 = max(0, min(cA, cB)), c1 = min(s_nativeW - 1, max(cA, cB));
+  int x1 = min(x + w, (int)s_canvas->width()) - 1, y1 = min(y + h, (int)s_canvas->height()) - 1;
+  x = max(x, 0); y = max(y, 0);
+  if (x1 < x || y1 < y) return;
+  int r0 = s_nativeH, r1 = -1, c0 = s_nativeW, c1 = -1;
+  for (int cx : {x, x1})
+    for (int cy : {y, y1}) {                           // the rectangle's corners in the frame buffer
+      int i = s_base + cx * s_dx + cy * s_dy;
+      r0 = min(r0, i / s_nativeW); r1 = max(r1, i / s_nativeW);
+      c0 = min(c0, i % s_nativeW); c1 = max(c1, i % s_nativeW);
+    }
   if (r1 < r0 || c1 < c0) return;
   if (s_bandHash) for (int k = 0; k < s_nBands; k++) s_bandHash[k] = ~0u;
   auto* src = (const uint16_t*)s_canvas->getBuffer();
@@ -310,45 +339,57 @@ void presentRect(int x, int y, int w, int h) {
 
 void setBrightness(int pct) { M5.Display.setBrightness(constrain(pct, 0, 100) * 255 / 100); }
 
-// ---- automatic 180-degree flip from the IMU ----
-// Upright in TAB5_ROTATION the accelerometer reads about +1 g on X; held the other way up
-// it reads -1 g. Portrait or lying flat keeps the current orientation.
-static bool s_flipped = false;
+// ---- automatic rotation from the IMU ----
+// Orientation k = 0..3 quarter turns from TAB5_ROTATION: 0 landscape, 2 landscape upside
+// down, 1 / 3 portrait. Upright in TAB5_ROTATION the accelerometer reads about +1 g on X
+// (-1 g upside down); in portrait the reading moves to Y. Lying flat keeps the current one.
+static int s_orient = 0;
 static volatile bool s_rotated = false;
 
-static void applyFlip(bool flipped) {
-  s_flipped = flipped;
-  int disp = flipped ? (TAB5_ROTATION + 2) % 4 : TAB5_ROTATION;
-  M5.Display.setRotation(disp);                      // touch follows the display rotation
-  int r = s_canvas->getRotation();
-  int r2 = (((r & 3) + 2) & 3) | (r & 4);             // same mapping turned 180 degrees
-  s_canvas->setRotation(r2);
-  s_row0 = s_nativeH - 1 - s_row0;                   // the mapping turns over too
-  s_rowStep = -s_rowStep;
-  s_col0 = s_nativeW - 1 - s_col0;
-  s_colStep = -s_colStep;
-  if (s_band) {
-    bandsDone();
-    s_bandRot = r2;
-    for (int k = 0; k < s_nBands; k++) s_bandHash[k] = ~0u;   // redraw everything
+static void applyOrientation(int k) {
+  s_orient = k;
+  M5.Display.setRotation((TAB5_ROTATION + k) % 4);   // touch follows the display rotation
+  if (s_fb) {
+    if (s_band) bandsDone();
+    if (!matchRotation()) log_w("Tab5: no canvas mapping for orientation %d", k);
+    if (s_band) {
+      s_bandRot = s_canvas->getRotation();
+      for (int i = 0; i < s_nBands; i++) s_bandHash[i] = ~0u;
+    }
+  } else {                                           // slow mode: a canvas the new shape of the screen
+    s_canvas->deleteSprite();
+    s_canvas->createSprite(M5.Display.width(), M5.Display.height());
   }
+  if (s_rowHash) for (int y = 0; y < s_nativeH; y++) s_rowHash[y] = ~0u;   // copy everything next time
   s_rotated = true;
 }
 
+static bool s_fixed = false;          // orientation set over serial (testing)
 static void autoRotate() {
 #if TAB5_AUTO_ROTATE
+  if (s_fixed) return;
   static uint32_t last = 0, since = 0;
-  static int pending = 0;
+  static int pending = -1;
   if (millis() - last < 200) return;
   last = millis();
   float ax, ay, az;
   if (!M5.Imu.getAccel(&ax, &ay, &az)) return;
-  int want = ax > 0.6f ? 1 : ax < -0.6f ? -1 : 0;     // 1 = normal, -1 = upside down
-  bool flip = want < 0;
-  if (want == 0 || flip == s_flipped) { pending = 0; return; }
-  if (pending != want) { pending = want; since = millis(); return; }
-  if (millis() - since >= 800) { pending = 0; applyFlip(flip); }
+  int want = -1;
+  if (fabsf(ax) > fabsf(ay)) { if (fabsf(ax) > 0.7f) want = ax > 0 ? 0 : 2; }
+  else if (fabsf(ay) > 0.7f) want = (ay > 0) != (TAB5_PORTRAIT_SIDE != 0) ? 1 : 3;
+#if !TAB5_PORTRAIT || TAB5_BANDED
+  if (want == 1 || want == 3) want = -1;             // portrait turned off: stay as it is
 #endif
+  if (want < 0 || want == s_orient) { pending = -1; return; }
+  if (pending != want) { pending = want; since = millis(); return; }
+  if (millis() - since >= 800) { pending = -1; applyOrientation(want); }
+#endif
+}
+
+// Fixed orientation for testing (the IMU is ignored); k outside 0..3 goes back to automatic.
+void setOrientation(int k) {
+  s_fixed = k >= 0 && k <= 3;
+  if (s_fixed && k != s_orient) applyOrientation(k);
 }
 
 bool orientationChanged() {
