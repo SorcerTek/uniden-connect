@@ -6,7 +6,7 @@ Welcome to the uniden-connect wiki!
 |---|---|
 | **Product** | Uniden Connect: network touchscreen remote and audio receiver for the Uniden SDS200 |
 | **Target hardware** | Freenove ESP32-S3 3.5" Display, FNK0104N (ESP32-S3-WROOM-1 N8R8); M5Stack Tab5 (ESP32-P4, 5" 1280x720) |
-| **Firmware baseline** | Version **v2.0.1**, `main` branch, tag `v2.0.1` (2026-11-19) |
+| **Firmware baseline** | Version **v2.1.0**, `main` branch, tag `v2.1.0` (2026-11-23) |
 | **Repository** | https://github.com/SorcerTek/uniden-connect |
 | **Document status** | Released. Describes the firmware exactly as it is at the baseline commit above. |
 
@@ -58,7 +58,7 @@ This document is the technical reference for the Uniden Connect firmware. It cov
 | F9 | Wireless (OTA) firmware updates. |
 | F10 | Software power control from the BOOT button or **KEYS > POWER** (power off, restart, and on the Tab5 a return to the Launcher), with a clean audio-session teardown. |
 | F11 | Network time clock, idle screen dimming, battery level indication, Wi-Fi signal icon, selectable key-backlight colour, boot logo and boot animation, firmware version display. |
-| F12 | Runs on two boards from one source tree: Freenove FNK0104N and M5Stack Tab5 (all Tab5 display revisions). On the Tab5 the screen turns over automatically with the device. |
+| F12 | Runs on two boards from one source tree: Freenove FNK0104N and M5Stack Tab5 (all Tab5 display revisions). On the Tab5 the screen follows the device in all four directions (portrait layouts included), with a rotation lock. |
 
 ---
 
@@ -136,10 +136,10 @@ The ST77922 has no reset line. It only accepts full-width window writes reliably
 | Display | 5" IPS, 1280 x 720, MIPI-DSI. Three panel revisions exist (ILI9881C + GT911 touch, ST7123, ST7121); M5GFX detects the fitted one automatically. |
 | Touch | Capacitive (GT911 or built into the ST712x) |
 | Wi-Fi | ESP32-C6 co-processor over SDIO (ESP-Hosted), 2.4 GHz |
-| Audio | ES8388 codec, NS4150B speaker amplifier, 3.5 mm headphone jack (same signal as the speaker) |
+| Audio | ES8388 codec, NS4150B speaker amplifier, 3.5 mm headphone jack (same signal; the speaker amplifier is switched off while the jack is in use, detected on the PI4IOE5V6408 expander at 0x43, input 7) |
 | Storage | microSD slot, used in SPI mode (SDMMC would clash with the Wi-Fi chip's SDIO link) |
 | Power | NP-F550 battery pack (Tab5 kit); power button (no BOOT button available to the firmware) |
-| Motion | BMI270 IMU, used for automatic 180° screen flip |
+| Motion | BMI270 IMU, used for automatic screen rotation (landscape, portrait, both ways up) |
 
 ### 3.4 Tab5 pins and specifics
 
@@ -180,13 +180,13 @@ The boot logo and animation are decoded with the ESP32-P4's hardware JPEG decode
 | `src/main.cpp` | Start-up sequence and main loop. |
 | `include/board.h` | Board interface: display start-up, canvas, screen updates (full, region, half-size), brightness, touch, orientation, Launcher support. |
 | `src/board_fnk0104n.cpp` | FNK0104N board layer (ST77922 panel, touch mapping). |
-| `src/board_tab5.cpp` | Tab5 board layer: frame-buffer display updates, IMU auto-flip, M5.Speaker audio output, battery, power and Launcher return. |
+| `src/board_tab5.cpp` | Tab5 board layer: frame-buffer display updates, IMU auto-rotation (four orientations), headphone detection, M5.Speaker audio output, battery, power and Launcher return. |
 | `src/display_st77922.*` | ST77922 QSPI panel driver: init, PWM brightness, sleep, full-frame push in horizontal bands. |
 | `src/touch_st77922.*` | Touch controller driver (I2C 0x55, 16-bit registers). |
 | `src/ui.*` | All screens and widgets, touch handling, on-screen keyboard, boot animation, dimming, weather-alert banner, serial debug hooks. |
 | `src/sds200.*` | SDS200 control client: UDP command transport, GSI XML reassembly and parsing, key, weather, hold and reboot commands. |
 | `src/rtsp_audio.*` | RTSP/RTP client: session set-up, keep-alive, RTP depacketising, G.711 / L16 decoding, retry back-off, lock-out detection, clean teardown. |
-| `src/audio_out.*` | ES8311 codec and amplifier control, I2S output, PSRAM jitter buffer, resampling to 16 kHz, volume, mute, beep. |
+| `src/audio_out.*` | ES8311 codec and amplifier control, I2S output, PSRAM jitter buffer, resampling to 16 kHz, volume, mute, beep and volume chime. |
 | `src/calls.*` | Call detection, SD card mount, CSV log, WAV recorder, recent-call list, replay, 1050 Hz Goertzel detector. |
 | `src/settings.*` | Persistent settings in NVS (namespace `uconnect`), with a delayed write. |
 | `src/ota.*` | ArduinoOTA service (enabled only when an update password is set). |
@@ -317,7 +317,9 @@ The received SDP is printed on the serial console for diagnostics.
 | `BATTERY_DEBUG` | 0 | Set to 1 to print battery mV and % every second |
 | `UI_MIN_FRAME_MS` | 40 | Shortest time between screen redraws |
 | `TAB5_ROTATION` | 3 | Tab5 landscape orientation (1 or 3) |
-| `TAB5_AUTO_ROTATE` | 1 | Turn the picture over when the Tab5 is turned over (IMU) |
+| `TAB5_AUTO_ROTATE` | 1 | Turn the picture with the Tab5 (IMU) |
+| `TAB5_PORTRAIT` | 1 | Use the portrait layouts when the Tab5 is held upright (0 = landscape only) |
+| `TAB5_PORTRAIT_SIDE` | 0 | Swap if portrait comes out upside down |
 | `TAB5_SPK_GAIN` | 12 | Tab5 speaker / headphone digital gain (M5Unified default 4) |
 | `TAB5_SD_SCK/MISO/MOSI/CS` | 43 / 39 / 44 / 42 | Tab5 microSD (SPI) |
 | `TAB5_WIFI_SDIO_PINS` | 12, 13, 11, 10, 9, 8, 15 | ESP32-C6 SDIO link |
@@ -335,6 +337,7 @@ The received SDP is printed on the serial console for diagnostics.
 | Dim after | Never, 30 s, 1, 2, 5, 10 min | SETTINGS |
 | Dimmed level | Off, 5, 10, 20, 30, 50 % | SETTINGS |
 | Key light colour | Amber, Orange, Red, Yellow, Green, Ice, Blue, Purple, Pink, White | SETTINGS |
+| Screen rotation (Tab5) | Auto, or Locked at the current orientation | SETTINGS |
 | Recording | On/off | KEYS > REC ON / REC OFF |
 | Favourites | 6 slots | FAVS |
 
@@ -457,7 +460,7 @@ The device then shows the main screen. The scanner indicator turns green once GS
 | Buttons | **SPK −**, **SPK +** (board speaker), **MUTE** (board speaker only), **KEYS**, **SCAN** (above MUTE), **WX** (above KEYS) |
 
 - The scanner's own volume and squelch are not changed by the device.
-- **SPK −** / **SPK +** play a short beep at the new level (unless muted).
+- **SPK −** / **SPK +** play a soft chime at the new level (unless muted): a higher note for up, a lower one for down.
 - **WX** puts the scanner into NOAA weather mode.
 - **SCAN** returns the scanner to normal scanning and releases any System / Department / Channel hold.
 - Whichever of WX and SCAN is active is outlined.
@@ -493,8 +496,8 @@ The device then shows the main screen. The scanner indicator turns green once GS
 
 ### 9.5 SETTINGS screen
 
-- The header shows the firmware version ("Version 2.0.1").
-- Brightness, dim-after time, dimmed level and key-light colour.
+- The header shows the firmware version ("Version 2.1.0").
+- Brightness, dim-after time, dimmed level, screen rotation (Tab5: Auto / Locked) and key-light colour.
 - Status of Wi-Fi / IP, scanner IP, SD card free space and the OTA service.
 - **WI-FI SETUP** (with **FORGET WI-FI**), **RECONNECT AUDIO**, **REBOOT SCANNER** (tap twice), **BACK**.
 
@@ -535,9 +538,17 @@ monitor (Tab5). `--` means there is no valid reading.
 
 ### 9.10 Tab5 screen orientation
 
-When the Tab5 is held upside down for about a second, the picture and the touch input turn over
-by 180° and the whole screen is redrawn. Portrait positions and lying flat keep the last
-orientation. Set `TAB5_AUTO_ROTATE` to 0 to disable.
+The picture and the touch input follow the Tab5 in four directions: landscape, landscape upside
+down, and portrait either way up. A new position is taken after it has been held for about a
+second; lying flat keeps the last one. The whole screen is redrawn after each turn.
+
+In portrait every page uses its own 320 x 480 layout: long system, department and channel names
+wrap onto two lines, the speaker level moves next to SCAN / WX, KEYS becomes three columns
+(scanner keys, number pad, then this device's keys), and lists show more rows.
+
+**SETTINGS > Screen rotation** set to *Locked* keeps the current orientation, including after a
+restart; *Auto* follows the Tab5 again. `TAB5_PORTRAIT` 0 limits it to landscape and
+`TAB5_AUTO_ROTATE` 0 turns rotation off.
 
 ---
 
@@ -592,7 +603,8 @@ The serial console runs at 115200 baud and reports:
 The console also accepts these debug inputs:
 - `S` returns a raw RGB565 frame-buffer dump (`SHOT` + 320 x 480 on the FNK0104N; `SHT3` + width, height and byte order on the Tab5).
 - `P<n>` switches to UI page *n*.
-- `B` plays the volume beep.
+- `B` plays the volume chime.
+- `O<n>` fixes the Tab5 picture at *n* quarter turns (0 landscape, 1 / 3 portrait, 2 upside down); `O9` returns to automatic.
 - `L` shows the boot logo.
 
 ---
@@ -608,6 +620,7 @@ The console also accepts these debug inputs:
 | Touch offset | Orientation | Enable `TOUCH_DEBUG`, then adjust `TOUCH_INVERT_X/Y` or `TOUCH_SWAP_XY` |
 | "Scanner not responding" | Wrong IP, different network, or scanner LAN disabled | Check the scanner IP on the setup screen and the scanner's network settings |
 | "PLAY failed" / "SETUP failed" | Another client holds the audio stream | Close ProScan, VLC, Sentinel or Siren audio |
+| Tab5 goes straight back to the Launcher after a USB upload | The Launcher sizes the app slot to the file it last installed; a larger new build doesn't fit, so the Tab5 refuses to start it | Install the new `.bin` through the Launcher from the SD card (it re-sizes the slot), or give the slot more room in the partition table |
 | "scanner busy" / AUDIO STUCK after a USB upload, RESET or battery pull | The previous session was not torn down, and the scanner keeps it until it restarts | Tap **AUDIO STUCK** twice, or **SETTINGS > REBOOT SCANNER**. Prefer RESTART / POWER OFF from the BOOT menu and OTA updates, which tear the session down cleanly. |
 | No sound while "streaming" | Speaker volume, mute, or scanner volume at 0 | Raise SPK and un-mute. Check the scanner's volume. |
 | Choppy audio | Wi-Fi jitter | Increase `AUDIO_PREBUFFER_MS` (e.g. 500). Improve the Wi-Fi signal. |
@@ -629,7 +642,8 @@ The console also accepts these debug inputs:
 - An RTSP session that was not torn down (after a USB upload, a hardware reset or a power loss) persists on the scanner until the scanner is restarted.
 - Only 2.4 GHz Wi-Fi is supported (ESP32-S3 and ESP32-C6 limitation).
 - Bluetooth speakers are not supported: both boards have Bluetooth Low Energy only, which cannot stream audio to A2DP speakers. A Bluetooth transmitter on the audio output (Tab5 3.5 mm jack) can be used instead.
-- Tab5: no wireless (OTA) updates (installs go through the Launcher); the speaker is not muted automatically when something is plugged into the 3.5 mm jack.
+- Tab5: no wireless (OTA) updates (installs go through the Launcher).
+- FNK0104N: landscape only (no motion sensor; the portrait layouts are Tab5-only for now).
 - The scanner's own volume and squelch are not controlled from the device.
 - The 1050 Hz alert works only while the scanner is receiving a NOAA weather channel.
 - Audio quality is limited by the scanner's stream: G.711, 8 kHz.

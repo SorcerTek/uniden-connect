@@ -21,10 +21,11 @@ What it does:
 
 The scanner is expected at **192.168.1.2** by default. Change it on the board's setup screen.
 
-**Current version: v2.0.1** (shown under SETTINGS and on the boot screen).
+**Current version: v2.1.0** (shown under SETTINGS and on the boot screen).
 
 | Version | Date | What changed |
 |---|---|---|
+| v2.1.0 | 2026-11-23 | Tab5: portrait mode (the picture follows the Tab5 in all four directions, with portrait layouts for every page), screen-rotation lock in SETTINGS, built-in speaker muted while something is plugged into the 3.5 mm jack. Both boards: SPK + / SPK - play a soft chime instead of the sharp beep. |
 | v2.0.1 | 2026-11-19 | Tab5: after auto-rotating, the whole screen is redrawn (no upside-down "ghost" top bar over the buttons); version and status text now visible on the boot screen; Settings shows "Version x.y.z". |
 | v2.0.0 | 2026-11-19 | M5Stack Tab5 support (should support all display versions (only tested on the latest S7221 display driver), Launcher install, smooth 1280x720 display, auto-flip, louder speaker). Both boards: POWER button on the KEYS page, Wi-Fi icon, board IP on the setup screen, instant volume beep. |
 | v1.0.0 | 2026-11-18 | First release for the Freenove FNK0104N. |
@@ -206,12 +207,15 @@ The same firmware also runs on the M5Stack Tab5 (all display versions: ILI9881C,
 ST7121 are detected automatically). Everything works the same as on the 3.5" board, with these
 differences:
 
-- The screens are scaled up to the 5" 1280x720 display with larger, smooth fonts. The picture
-  turns over automatically when you turn the Tab5 upside down (`TAB5_AUTO_ROTATE`).
+- The screens are scaled up to the 5" 1280x720 display with larger, smooth fonts.
+- The picture follows the Tab5: turn it upright for portrait layouts of every page, or upside
+  down in either position (`TAB5_AUTO_ROTATE`, `TAB5_PORTRAIT`). **SETTINGS > Screen rotation**
+  locks it the way it's facing (kept after a restart); tap again for Auto.
 - There is no BOOT button to hold: open the power menu from **KEYS > POWER**. It also has
   **LAUNCHER** (back to bmorcelli's Launcher) when installed under it. Turn on with the Tab5's power button.
 - Battery level comes from the Tab5's battery pack (NP-F550), if fitted.
-- The speaker is louder than M5Stack's default (`TAB5_SPK_GAIN`); the 3.5 mm jack carries the same audio.
+- The speaker is louder than M5Stack's default (`TAB5_SPK_GAIN`). Plug headphones or a speaker
+  into the 3.5 mm jack and the built-in speaker turns off; unplug and it comes back.
 - Wireless (OTA) updates are off on the Tab5: install new versions through the Launcher.
 - Bluetooth speakers aren't possible (the Tab5's ESP32-C6 is Bluetooth Low Energy only, no audio
   streaming); use a Bluetooth transmitter on the 3.5 mm jack instead.
